@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Art Blocks — Paint with Falling Shapes</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Art Blocks</h1>
+      <p class="subtitle">Drop shapes. Build art.</p>
+    </header>
+
+    <main>
+      <aside id="sidebar-left">
+        <section class="panel" id="color-panel">
+          <h2>Color</h2>
+          <div id="palette"></div>
+          <div id="custom-color-row">
+            <label for="custom-color">Custom</label>
+            <input type="color" id="custom-color" value="#ff6b6b" />
+          </div>
+          <div id="current-color-preview">
+            <span>Active</span>
+            <div id="active-swatch"></div>
+          </div>
+        </section>
+
+        <section class="panel" id="shape-panel">
+          <h2>Shape</h2>
+          <div id="shape-selector"></div>
+        </section>
+      </aside>
+
+      <div id="canvas-area">
+        <canvas id="game-canvas"></canvas>
+        <div id="ghost-label">Ghost preview</div>
+      </div>
+
+      <aside id="sidebar-right">
+        <section class="panel" id="controls-panel">
+          <h2>Controls</h2>
+          <button id="btn-drop" class="primary-btn">Drop Block</button>
+          <div class="key-hints">
+            <div class="key-row"><kbd>←</kbd><kbd>→</kbd> Move</div>
+            <div class="key-row"><kbd>↑</kbd> Rotate</div>
+            <div class="key-row"><kbd>↓</kbd> Fall faster</div>
+            <div class="key-row"><kbd>Space</kbd> Lock now</div>
+          </div>
+        </section>
+
+        <section class="panel" id="actions-panel">
+          <h2>Canvas</h2>
+          <button id="btn-undo" class="secondary-btn">Undo last</button>
+          <button id="btn-clear" class="danger-btn">Clear all</button>
+          <button id="btn-save" class="secondary-btn">Save image</button>
+        </section>
+
+        <section class="panel" id="speed-panel">
+          <h2>Fall speed</h2>
+          <input type="range" id="speed-slider" min="1" max="10" value="4" />
+          <div id="speed-labels">
+            <span>Slow</span><span>Fast</span>
+          </div>
+        </section>
+
+        <section class="panel" id="opacity-panel">
+          <h2>Opacity</h2>
+          <input type="range" id="opacity-slider" min="10" max="100" value="100" />
+          <div id="opacity-labels">
+            <span>10%</span><span>100%</span>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <div id="toast" aria-live="polite"></div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
