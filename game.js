@@ -52,6 +52,9 @@ let recordTimerInterval = null;
 const CANVAS_W = 4800;
 const CANVAS_H = 2700;
 
+// At speed=1, one chunk every 3 seconds
+const speed1MsPerStamp = 3000;
+
 // Pre-generated shape pools for speed
 let shapePoolStripes = [];
 let shapePoolClumps = [];
@@ -336,12 +339,25 @@ function tick(now) {
     ctx.restore();
   }
 
-  // Stamps per frame: speed controls rate, density multiplies
-  // At speed 1: ~1 per frame, speed 100: ~60 per frame
-  // Density multiplies that further
-  const stampsThisFrame = Math.max(1,
-    Math.floor((p.speed / 100) * 60 * (p.density / 10))
-  );
+  // Stamps per frame: speed 1 = 1 chunk every ~3 seconds
+  // speed 100 = 60 per frame. Exponential curve for wide range.
+  // density multiplies further.
+  stampAccum += dt;
+  const msPerStamp = speed1MsPerStamp / Math.pow(p.speed / 100, 2.5);
+  let stampsThisFrame = 0;
+  if (p.speed <= 5) {
+    // Very slow: use accumulator for sub-frame timing
+    while (stampAccum >= msPerStamp) {
+      stampAccum -= msPerStamp;
+      stampsThisFrame++;
+    }
+    stampsThisFrame = Math.max(0, stampsThisFrame * Math.max(1, Math.floor(p.density / 10)));
+  } else {
+    stampAccum = 0;
+    stampsThisFrame = Math.max(1,
+      Math.floor(Math.pow(p.speed / 100, 2.5) * 60 * (p.density / 10))
+    );
+  }
 
   for (let i = 0; i < stampsThisFrame; i++) {
     stampChunk();
