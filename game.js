@@ -1,9 +1,10 @@
 'use strict';
 
 /* ═══════════════════════════════════════════════════════════════
-   ABSTRACT ART — PIXEL CHUNK ANIMATOR
-   Generates geometric tetris-like chunks from source artwork,
-   animates them hypnotically, with live controls and MP4 recording.
+   ABSTRACT ART — PIXEL CHUNK STACKER
+   Samples geometric tetris-like chunks from source artwork and
+   stamps them permanently onto the canvas, building layers.
+   Controls adjust in real-time, even while recording.
 ═══════════════════════════════════════════════════════════════ */
 
 /* ── DOM ───────────────────────────────────────────────────────── */
@@ -34,13 +35,13 @@ const sliders = {
 };
 
 /* ── STATE ─────────────────────────────────────────────────────── */
-let sourceImage = null;        // loaded Image element
-let sourceCanvas = null;       // offscreen canvas with original art
+let sourceImage = null;
+let sourceCanvas = null;
 let sourceCtx = null;
-let chunks = [];               // active animated chunks
 let paused = false;
 let animFrame = null;
 let lastTime = 0;
+let stampAccum = 0;  // time accumulator for stamping
 
 // Recording
 let mediaRecorder = null;
@@ -52,7 +53,7 @@ let recordTimerInterval = null;
 const CANVAS_W = 2400;
 const CANVAS_H = 1350;
 
-/* ── PARAMS (live-updated from sliders) ────────────────────────── */
+/* ── PARAMS ────────────────────────────────────────────────────── */
 function getParams() {
   return {
     speed:     parseInt(sliders.speed.value),
@@ -77,7 +78,7 @@ function loadImage(file) {
       initSourceCanvas();
       dropOverlay.classList.remove('visible');
       startAnimation();
-      showToast('Artwork loaded — animation started');
+      showToast('Artwork loaded — chunks stacking');
     };
     img.src = e.target.result;
   };
@@ -110,30 +111,22 @@ function initSourceCanvas() {
   }
   sourceCtx.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, CANVAS_W, CANVAS_H);
 
-  // Draw original onto main canvas
+  // Start with original on main canvas
   ctx.drawImage(sourceCanvas, 0, 0);
 }
 
 /* ═══════════════════════════════════════════════════════════════
    TETRIS / GEOMETRIC CHUNK SHAPE GENERATION
    Creates polyomino-like shapes with squared-off edges.
-   Each shape is a set of grid cells that connect together,
-   producing geometric forms with up to maxEdges edges.
 ═══════════════════════════════════════════════════════════════ */
 
 function generateTetrisShape(cellSize, maxEdges) {
-  // Number of cells in the polyomino (more cells = more edges possible)
-  // Each cell contributes up to 4 edges, shared edges reduce count
-  // For N cells in a line: edges = 2*N + 2
-  // For more complex shapes, edges vary
   const targetEdges = 4 + Math.floor(Math.random() * (maxEdges - 4));
-  // Estimate cells needed: roughly targetEdges / 2 cells
   const numCells = Math.max(2, Math.min(40, Math.ceil(targetEdges / 2.5)));
 
   const cells = new Set();
   cells.add('0,0');
 
-  // Grow the polyomino by adding adjacent cells
   for (let i = 1; i < numCells; i++) {
     const candidates = [];
     for (const key of cells) {
@@ -145,61 +138,42 @@ function generateTetrisShape(cellSize, maxEdges) {
       }
     }
     if (candidates.length === 0) break;
-
-    // Bias towards creating more interesting shapes
-    // Sometimes pick random, sometimes extend in a direction
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
     cells.add(pick);
   }
 
-  // Convert to cell coordinates
   const cellCoords = [];
   for (const key of cells) {
     const [r, c] = key.split(',').map(Number);
     cellCoords.push([r, c]);
   }
 
-  // Normalize to start at 0,0
   const minR = Math.min(...cellCoords.map(c => c[0]));
   const minC = Math.min(...cellCoords.map(c => c[1]));
   const normalized = cellCoords.map(([r, c]) => [r - minR, c - minC]);
 
-  // Build the outline path (pixel coordinates)
   return buildOutlinePath(normalized, cellSize);
 }
 
 function buildOutlinePath(cells, cellSize) {
-  // Create a grid lookup
   const cellSet = new Set(cells.map(([r, c]) => `${r},${c}`));
   const maxR = Math.max(...cells.map(c => c[0]));
   const maxC = Math.max(...cells.map(c => c[1]));
 
-  // March around the perimeter to build a squared-off polygon
-  // Use edge segments approach
   const edges = [];
-
   for (const [r, c] of cells) {
     const x = c * cellSize;
     const y = r * cellSize;
-    // Top edge
-    if (!cellSet.has(`${r-1},${c}`)) {
-      edges.push({ x1: x, y1: y, x2: x + cellSize, y2: y, dir: 'top' });
-    }
-    // Bottom edge
-    if (!cellSet.has(`${r+1},${c}`)) {
-      edges.push({ x1: x, y1: y + cellSize, x2: x + cellSize, y2: y + cellSize, dir: 'bottom' });
-    }
-    // Left edge
-    if (!cellSet.has(`${r},${c-1}`)) {
-      edges.push({ x1: x, y1: y, x2: x, y2: y + cellSize, dir: 'left' });
-    }
-    // Right edge
-    if (!cellSet.has(`${r},${c+1}`)) {
-      edges.push({ x1: x + cellSize, y1: y, x2: x + cellSize, y2: y + cellSize, dir: 'right' });
-    }
+    if (!cellSet.has(`${r-1},${c}`))
+      edges.push({ x1: x, y1: y, x2: x + cellSize, y2: y });
+    if (!cellSet.has(`${r+1},${c}`))
+      edges.push({ x1: x, y1: y + cellSize, x2: x + cellSize, y2: y + cellSize });
+    if (!cellSet.has(`${r},${c-1}`))
+      edges.push({ x1: x, y1: y, x2: x, y2: y + cellSize });
+    if (!cellSet.has(`${r},${c+1}`))
+      edges.push({ x1: x + cellSize, y1: y, x2: x + cellSize, y2: y + cellSize });
   }
 
-  // Build connected path from edges
   const path = traceOutline(edges);
 
   return {
@@ -215,7 +189,6 @@ function buildOutlinePath(cells, cellSize) {
 function traceOutline(edges) {
   if (edges.length === 0) return [[0, 0]];
 
-  // Build adjacency: map from vertex to connected vertices via edges
   const vertexEdges = new Map();
   const addEdge = (x1, y1, x2, y2) => {
     const k1 = `${x1},${y1}`;
@@ -230,7 +203,6 @@ function traceOutline(edges) {
     addEdge(e.x1, e.y1, e.x2, e.y2);
   }
 
-  // Trace the outline starting from the topmost-leftmost vertex
   const vertices = [...vertexEdges.keys()].sort((a, b) => {
     const [ax, ay] = a.split(',').map(Number);
     const [bx, by] = b.split(',').map(Number);
@@ -244,7 +216,6 @@ function traceOutline(edges) {
   const visited = new Set();
   let current = start;
 
-  // Simple outline tracing
   for (let safety = 0; safety < 1000; safety++) {
     const [cx, cy] = current.split(',').map(Number);
     path.push([cx, cy]);
@@ -270,148 +241,62 @@ function traceOutline(edges) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   CHUNK CREATION & MANAGEMENT
+   STAMP A CHUNK — permanently paste onto the canvas
 ═══════════════════════════════════════════════════════════════ */
 
-function createChunk() {
+function stampChunk() {
   const p = getParams();
   const size = p.minSize + Math.random() * (p.maxSize - p.minSize);
   const cellSize = Math.max(4, Math.floor(size / (3 + Math.random() * 5)));
 
   const shape = generateTetrisShape(cellSize, p.maxEdges);
+  if (shape.width < 2 || shape.height < 2) return;
 
-  // Source position: random position on the artwork
-  const srcX = Math.floor(Math.random() * (CANVAS_W - shape.width));
-  const srcY = Math.floor(Math.random() * (CANVAS_H - shape.height));
+  // Source position: where to sample pixels from the original artwork
+  const srcX = Math.floor(Math.random() * Math.max(1, CANVAS_W - shape.width));
+  const srcY = Math.floor(Math.random() * Math.max(1, CANVAS_H - shape.height));
 
-  // Destination: offset from source for hypnotic drift
-  const driftRange = p.drift * 300;
-  const destX = srcX + (Math.random() - 0.5) * driftRange;
-  const destY = srcY + (Math.random() - 0.5) * driftRange;
+  // Destination: where to paste (offset from source for drift effect)
+  const driftRange = p.drift * 400;
+  let destX = srcX + Math.round((Math.random() - 0.5) * driftRange);
+  let destY = srcY + Math.round((Math.random() - 0.5) * driftRange);
 
-  // Create an offscreen canvas for this chunk's pixel data
-  const chunkCanvas = document.createElement('canvas');
-  chunkCanvas.width = shape.width;
-  chunkCanvas.height = shape.height;
-  const chunkCtx = chunkCanvas.getContext('2d');
+  // Clamp to canvas
+  destX = Math.max(-shape.width / 2, Math.min(CANVAS_W - shape.width / 2, destX));
+  destY = Math.max(-shape.height / 2, Math.min(CANVAS_H - shape.height / 2, destY));
 
-  // Draw the source pixels into the chunk canvas, clipped to shape
-  chunkCtx.save();
-  chunkCtx.beginPath();
-  if (shape.path.length > 0) {
-    chunkCtx.moveTo(shape.path[0][0], shape.path[0][1]);
-    for (let i = 1; i < shape.path.length; i++) {
-      chunkCtx.lineTo(shape.path[i][0], shape.path[i][1]);
-    }
-    chunkCtx.closePath();
-  }
-  chunkCtx.clip();
-
-  // Copy pixels from source
-  chunkCtx.drawImage(sourceCanvas, srcX, srcY, shape.width, shape.height, 0, 0, shape.width, shape.height);
-  chunkCtx.restore();
-
-  const speedMult = 0.2 + Math.random() * 1.5;
-  const phase = Math.random() * Math.PI * 2;
-
-  return {
-    canvas: chunkCanvas,
-    shape,
-    srcX, srcY,
-    destX, destY,
-    x: srcX,
-    y: srcY,
-    speedMult,
-    phase,
-    age: 0,
-    lifetime: 3000 + Math.random() * 8000, // 3-11 seconds
-    opacity: 0,
-    state: 'fadein', // fadein -> visible -> fadeout -> dead
-  };
-}
-
-function updateChunks(dt) {
-  const p = getParams();
-  const speedFactor = p.speed / 50;
-
-  // Spawn new chunks based on density
-  const targetCount = p.density * 3;
-  while (chunks.length < targetCount) {
-    chunks.push(createChunk());
-  }
-
-  // Update each chunk
-  for (let i = chunks.length - 1; i >= 0; i--) {
-    const c = chunks[i];
-    c.age += dt;
-
-    const progress = c.age / c.lifetime;
-    const drift = p.drift;
-
-    // Hypnotic sinusoidal movement
-    const t = c.age * 0.001 * c.speedMult * speedFactor;
-    c.x = c.srcX + (c.destX - c.srcX) * Math.sin(t + c.phase) * 0.5 +
-           Math.sin(t * 0.7 + c.phase * 2) * drift * 40;
-    c.y = c.srcY + (c.destY - c.srcY) * Math.cos(t * 0.8 + c.phase) * 0.5 +
-           Math.cos(t * 0.6 + c.phase * 3) * drift * 40;
-
-    // Opacity lifecycle
-    const fadeInDuration = 0.1;
-    const fadeOutStart = 0.75;
-    if (progress < fadeInDuration) {
-      c.opacity = progress / fadeInDuration;
-      c.state = 'fadein';
-    } else if (progress < fadeOutStart) {
-      c.opacity = 1;
-      c.state = 'visible';
-    } else if (progress < 1) {
-      c.opacity = 1 - (progress - fadeOutStart) / (1 - fadeOutStart);
-      c.state = 'fadeout';
-    } else {
-      chunks.splice(i, 1);
-      continue;
-    }
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   RENDERING
-═══════════════════════════════════════════════════════════════ */
-
-function render() {
-  const p = getParams();
-
-  // Clear
-  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-
-  // Draw the animated state (original + chunks overlay)
-  // Start with original
-  ctx.drawImage(sourceCanvas, 0, 0);
-
-  // Draw chunks on top
+  // Build clip path and stamp directly onto main canvas
   ctx.save();
-  for (const c of chunks) {
-    ctx.globalAlpha = c.opacity * (1 - p.restore);
-    ctx.drawImage(c.canvas, Math.round(c.x), Math.round(c.y));
+  ctx.beginPath();
+  if (shape.path.length > 1) {
+    ctx.moveTo(shape.path[0][0] + destX, shape.path[0][1] + destY);
+    for (let i = 1; i < shape.path.length; i++) {
+      ctx.lineTo(shape.path[i][0] + destX, shape.path[i][1] + destY);
+    }
+    ctx.closePath();
+  } else {
+    // Fallback: just use a rectangle
+    ctx.rect(destX, destY, shape.width, shape.height);
   }
-  ctx.restore();
+  ctx.clip();
 
-  // Blend towards original based on restore slider
-  if (p.restore > 0) {
-    ctx.save();
-    ctx.globalAlpha = p.restore;
-    ctx.drawImage(sourceCanvas, 0, 0);
-    ctx.restore();
-  }
+  // Draw the source artwork pixels at the destination
+  ctx.drawImage(
+    sourceCanvas,
+    srcX, srcY, shape.width, shape.height,
+    destX, destY, shape.width, shape.height
+  );
+
+  ctx.restore();
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ANIMATION LOOP
+   ANIMATION LOOP — continuously stamps chunks
 ═══════════════════════════════════════════════════════════════ */
 
 function startAnimation() {
   if (animFrame) cancelAnimationFrame(animFrame);
-  chunks = [];
+  stampAccum = 0;
   lastTime = performance.now();
   paused = false;
   btnPause.textContent = 'Pause';
@@ -424,22 +309,43 @@ function tick(now) {
   if (!sourceImage || paused) return;
 
   if (!now) now = performance.now();
-  const dt = Math.min(now - lastTime, 100); // cap dt
+  const dt = Math.min(now - lastTime, 100);
   lastTime = now;
 
-  updateChunks(dt);
-  render();
+  const p = getParams();
+
+  // Restore slider: blend back towards original
+  if (p.restore > 0) {
+    ctx.save();
+    ctx.globalAlpha = p.restore * 0.15; // gradual blend per frame
+    ctx.drawImage(sourceCanvas, 0, 0);
+    ctx.restore();
+  }
+
+  // How many chunks to stamp per second
+  // speed 1 = ~2/sec, speed 100 = ~200/sec
+  const chunksPerSec = 2 + (p.speed / 100) * 198;
+  // density multiplier: stamps multiple chunks per interval
+  const densityMult = p.density;
+
+  stampAccum += dt;
+  const interval = 1000 / chunksPerSec;
+
+  while (stampAccum >= interval) {
+    stampAccum -= interval;
+    for (let d = 0; d < densityMult; d++) {
+      stampChunk();
+    }
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   MP4 RECORDING (via MediaRecorder + WebM → download)
+   MP4 RECORDING
 ═══════════════════════════════════════════════════════════════ */
 
 function startRecording() {
-  // Try to get a video/webm stream from the canvas
-  const stream = canvas.captureStream(30); // 30 fps
+  const stream = canvas.captureStream(30);
 
-  // Try preferred codecs
   const mimeTypes = [
     'video/webm;codecs=vp9',
     'video/webm;codecs=vp8',
@@ -463,7 +369,7 @@ function startRecording() {
   recordedChunks = [];
   mediaRecorder = new MediaRecorder(stream, {
     mimeType,
-    videoBitsPerSecond: 8000000, // 8 Mbps for quality
+    videoBitsPerSecond: 8000000,
   });
 
   mediaRecorder.ondataavailable = (e) => {
@@ -482,7 +388,7 @@ function startRecording() {
     showToast(`Recording saved as .${ext}`);
   };
 
-  mediaRecorder.start(100); // collect data every 100ms
+  mediaRecorder.start(100);
   recordStartTime = Date.now();
 
   btnRecord.disabled = true;
@@ -496,7 +402,7 @@ function startRecording() {
     recordTime.textContent = `${mins}:${secs}`;
   }, 500);
 
-  showToast('Recording started — adjust controls freely');
+  showToast('Recording — adjust sliders to program the output');
 }
 
 function stopRecording() {
@@ -557,12 +463,12 @@ btnPause.addEventListener('click', () => {
 });
 
 btnReset.addEventListener('click', () => {
-  chunks = [];
   if (sourceCanvas) {
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.drawImage(sourceCanvas, 0, 0);
   }
-  showToast('Animation reset');
+  stampAccum = 0;
+  showToast('Reset to original');
 });
 
 // Recording
@@ -575,7 +481,6 @@ btnLoadNew.addEventListener('click', () => {
     stopRecording();
   }
   if (animFrame) cancelAnimationFrame(animFrame);
-  chunks = [];
   sourceImage = null;
   dropOverlay.classList.add('visible');
   fileInput.value = '';
@@ -591,7 +496,7 @@ function showToast(msg) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   INIT — set canvas size and wait for image
+   INIT
 ═══════════════════════════════════════════════════════════════ */
 canvas.width = CANVAS_W;
 canvas.height = CANVAS_H;
