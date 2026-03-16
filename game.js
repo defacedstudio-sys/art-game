@@ -4,7 +4,7 @@
    ABSTRACT ART — PIXEL CHUNK STACKER
    Samples geometric tetris-like chunks from source artwork and
    stamps them permanently onto the canvas, building layers.
-   Controls adjust in real-time, even while recording.
+   Supports stripes, clumps, weird shapes, white-biased sampling.
 ═══════════════════════════════════════════════════════════════ */
 
 /* ── DOM ───────────────────────────────────────────────────────── */
@@ -25,23 +25,26 @@ const recordTime  = document.getElementById('record-time');
 const toast       = document.getElementById('toast');
 
 const sliders = {
-  speed:   document.getElementById('speed-slider'),
-  minSize: document.getElementById('min-size-slider'),
-  maxSize: document.getElementById('max-size-slider'),
-  density: document.getElementById('density-slider'),
-  edges:   document.getElementById('edges-slider'),
-  restore: document.getElementById('restore-slider'),
-  drift:   document.getElementById('drift-slider'),
+  speed:      document.getElementById('speed-slider'),
+  minSize:    document.getElementById('min-size-slider'),
+  maxSize:    document.getElementById('max-size-slider'),
+  density:    document.getElementById('density-slider'),
+  edges:      document.getElementById('edges-slider'),
+  restore:    document.getElementById('restore-slider'),
+  drift:      document.getElementById('drift-slider'),
+  whiteBias:  document.getElementById('white-bias-slider'),
+  shapeStyle: document.getElementById('shape-style-slider'),
 };
 
 /* ── STATE ─────────────────────────────────────────────────────── */
 let sourceImage = null;
 let sourceCanvas = null;
 let sourceCtx = null;
+let sourceImageData = null; // for white-bias sampling
 let paused = false;
 let animFrame = null;
 let lastTime = 0;
-let stampAccum = 0;  // time accumulator for stamping
+let stampAccum = 0;
 
 // Recording
 let mediaRecorder = null;
@@ -50,19 +53,21 @@ let recordStartTime = 0;
 let recordTimerInterval = null;
 
 // Canvas dimensions (>2000px)
-const CANVAS_W = 2400;
-const CANVAS_H = 1350;
+const CANVAS_W = 4800;
+const CANVAS_H = 2700;
 
 /* ── PARAMS ────────────────────────────────────────────────────── */
 function getParams() {
   return {
-    speed:     parseInt(sliders.speed.value),
-    minSize:   parseInt(sliders.minSize.value),
-    maxSize:   parseInt(sliders.maxSize.value),
-    density:   parseInt(sliders.density.value),
-    maxEdges:  parseInt(sliders.edges.value),
-    restore:   parseInt(sliders.restore.value) / 100,
-    drift:     parseInt(sliders.drift.value) / 100,
+    speed:      parseInt(sliders.speed.value),
+    minSize:    parseInt(sliders.minSize.value),
+    maxSize:    parseInt(sliders.maxSize.value),
+    density:    parseInt(sliders.density.value),
+    maxEdges:   parseInt(sliders.edges.value),
+    restore:    parseInt(sliders.restore.value) / 100,
+    drift:      parseInt(sliders.drift.value) / 100,
+    whiteBias:  parseInt(sliders.whiteBias.value) / 100,
+    shapeStyle: parseInt(sliders.shapeStyle.value) / 100, // 0=stripes, 1=clumps
   };
 }
 
@@ -94,7 +99,6 @@ function initSourceCanvas() {
   sourceCanvas.height = CANVAS_H;
   sourceCtx = sourceCanvas.getContext('2d');
 
-  // Draw source image scaled to fill canvas (cover)
   const imgAspect = sourceImage.width / sourceImage.height;
   const canAspect = CANVAS_W / CANVAS_H;
   let sw, sh, sx, sy;
@@ -111,34 +115,119 @@ function initSourceCanvas() {
   }
   sourceCtx.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, CANVAS_W, CANVAS_H);
 
-  // Start with original on main canvas
+  // Cache pixel data for white-bias sampling
+  sourceImageData = sourceCtx.getImageData(0, 0, CANVAS_W, CANVAS_H);
+
   ctx.drawImage(sourceCanvas, 0, 0);
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TETRIS / GEOMETRIC CHUNK SHAPE GENERATION
-   Creates polyomino-like shapes with squared-off edges.
+   WHITE-BIAS SAMPLING
+   Picks source positions biased towards whiter/lighter areas.
 ═══════════════════════════════════════════════════════════════ */
 
-function generateTetrisShape(cellSize, maxEdges) {
+function getWhiteness(x, y, w, h) {
+  if (!sourceImageData) return 0.5;
+  const data = sourceImageData.data;
+  // Sample a few random pixels in the region for speed
+  const samples = Math.min(12, w * h);
+  let totalBrightness = 0;
+  for (let i = 0; i < samples; i++) {
+    const sx = Math.floor(x + Math.random() * w);
+    const sy = Math.floor(y + Math.random() * h);
+    const idx = (sy * CANVAS_W + sx) * 4;
+    const r = data[idx] || 0;
+    const g = data[idx + 1] || 0;
+    const b = data[idx + 2] || 0;
+    totalBrightness += (r + g + b) / (3 * 255);
+  }
+  return totalBrightness / samples;
+}
+
+function pickSourcePosition(w, h, whiteBias) {
+  if (whiteBias < 0.05) {
+    // No bias — pure random
+    return [
+      Math.floor(Math.random() * Math.max(1, CANVAS_W - w)),
+      Math.floor(Math.random() * Math.max(1, CANVAS_H - h)),
+    ];
+  }
+
+  // Try multiple candidates, pick the whitest one weighted by bias
+  const attempts = Math.floor(3 + whiteBias * 20); // 3-23 attempts
+  let bestX = 0, bestY = 0, bestScore = -1;
+
+  for (let i = 0; i < attempts; i++) {
+    const cx = Math.floor(Math.random() * Math.max(1, CANVAS_W - w));
+    const cy = Math.floor(Math.random() * Math.max(1, CANVAS_H - h));
+    const whiteness = getWhiteness(cx, cy, w, h);
+    // Score: blend between random (0.5) and whiteness based on bias
+    const score = (1 - whiteBias) * Math.random() + whiteBias * whiteness;
+    if (score > bestScore) {
+      bestScore = score;
+      bestX = cx;
+      bestY = cy;
+    }
+  }
+
+  return [bestX, bestY];
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SHAPE GENERATION
+   shapeStyle: 0 = long stripes, 0.5 = mixed/weird, 1 = fat clumps
+═══════════════════════════════════════════════════════════════ */
+
+function generateShape(cellSize, maxEdges, shapeStyle) {
   const targetEdges = 4 + Math.floor(Math.random() * (maxEdges - 4));
-  const numCells = Math.max(2, Math.min(40, Math.ceil(targetEdges / 2.5)));
+  const numCells = Math.max(2, Math.min(60, Math.ceil(targetEdges / 2.2)));
 
   const cells = new Set();
   cells.add('0,0');
 
+  // Track a "direction" for stripe-like growth
+  // shapeStyle 0 = strongly directional (stripes)
+  // shapeStyle 1 = purely random (clumpy)
+  // in between = weird mixed shapes
+  const dirBias = 1 - shapeStyle; // 1 = full stripe, 0 = full clump
+  let prefDir = Math.random() < 0.5 ? 'h' : 'v'; // preferred axis
+
   for (let i = 1; i < numCells; i++) {
     const candidates = [];
+    const preferred = [];
+
     for (const key of cells) {
       const [r, c] = key.split(',').map(Number);
-      const neighbors = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]];
-      for (const [nr, nc] of neighbors) {
-        const nk = `${nr},${nc}`;
-        if (!cells.has(nk)) candidates.push(nk);
+      const neighbors = [
+        { pos: [r-1, c], axis: 'v' },
+        { pos: [r+1, c], axis: 'v' },
+        { pos: [r, c-1], axis: 'h' },
+        { pos: [r, c+1], axis: 'h' },
+      ];
+      for (const n of neighbors) {
+        const nk = `${n.pos[0]},${n.pos[1]}`;
+        if (!cells.has(nk)) {
+          candidates.push(nk);
+          if (n.axis === prefDir) preferred.push(nk);
+        }
       }
     }
+
     if (candidates.length === 0) break;
-    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+
+    // Mix between preferred direction and random based on shapeStyle
+    let pick;
+    if (preferred.length > 0 && Math.random() < dirBias * 0.85) {
+      pick = preferred[Math.floor(Math.random() * preferred.length)];
+    } else {
+      pick = candidates[Math.floor(Math.random() * candidates.length)];
+    }
+
+    // Occasionally switch direction for weird shapes (mid-range style)
+    if (shapeStyle > 0.2 && shapeStyle < 0.8 && Math.random() < 0.15) {
+      prefDir = prefDir === 'h' ? 'v' : 'h';
+    }
+
     cells.add(pick);
   }
 
@@ -216,7 +305,7 @@ function traceOutline(edges) {
   const visited = new Set();
   let current = start;
 
-  for (let safety = 0; safety < 1000; safety++) {
+  for (let safety = 0; safety < 2000; safety++) {
     const [cx, cy] = current.split(',').map(Number);
     path.push([cx, cy]);
 
@@ -247,25 +336,23 @@ function traceOutline(edges) {
 function stampChunk() {
   const p = getParams();
   const size = p.minSize + Math.random() * (p.maxSize - p.minSize);
-  const cellSize = Math.max(4, Math.floor(size / (3 + Math.random() * 5)));
+  const cellSize = Math.max(2, Math.floor(size / (2 + Math.random() * 6)));
 
-  const shape = generateTetrisShape(cellSize, p.maxEdges);
+  const shape = generateShape(cellSize, p.maxEdges, p.shapeStyle);
   if (shape.width < 2 || shape.height < 2) return;
 
-  // Source position: where to sample pixels from the original artwork
-  const srcX = Math.floor(Math.random() * Math.max(1, CANVAS_W - shape.width));
-  const srcY = Math.floor(Math.random() * Math.max(1, CANVAS_H - shape.height));
+  // Pick source position with white bias
+  const [srcX, srcY] = pickSourcePosition(shape.width, shape.height, p.whiteBias);
 
-  // Destination: where to paste (offset from source for drift effect)
+  // Destination offset
   const driftRange = p.drift * 400;
   let destX = srcX + Math.round((Math.random() - 0.5) * driftRange);
   let destY = srcY + Math.round((Math.random() - 0.5) * driftRange);
 
-  // Clamp to canvas
   destX = Math.max(-shape.width / 2, Math.min(CANVAS_W - shape.width / 2, destX));
   destY = Math.max(-shape.height / 2, Math.min(CANVAS_H - shape.height / 2, destY));
 
-  // Build clip path and stamp directly onto main canvas
+  // Stamp with clip path
   ctx.save();
   ctx.beginPath();
   if (shape.path.length > 1) {
@@ -275,12 +362,10 @@ function stampChunk() {
     }
     ctx.closePath();
   } else {
-    // Fallback: just use a rectangle
     ctx.rect(destX, destY, shape.width, shape.height);
   }
   ctx.clip();
 
-  // Draw the source artwork pixels at the destination
   ctx.drawImage(
     sourceCanvas,
     srcX, srcY, shape.width, shape.height,
@@ -291,7 +376,7 @@ function stampChunk() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ANIMATION LOOP — continuously stamps chunks
+   ANIMATION LOOP
 ═══════════════════════════════════════════════════════════════ */
 
 function startAnimation() {
@@ -317,15 +402,12 @@ function tick(now) {
   // Restore slider: blend back towards original
   if (p.restore > 0) {
     ctx.save();
-    ctx.globalAlpha = p.restore * 0.15; // gradual blend per frame
+    ctx.globalAlpha = p.restore * 0.15;
     ctx.drawImage(sourceCanvas, 0, 0);
     ctx.restore();
   }
 
-  // How many chunks to stamp per second
-  // speed 1 = ~2/sec, speed 100 = ~200/sec
   const chunksPerSec = 2 + (p.speed / 100) * 198;
-  // density multiplier: stamps multiple chunks per interval
   const densityMult = p.density;
 
   stampAccum += dt;
@@ -421,7 +503,6 @@ function stopRecording() {
    EVENT HANDLERS
 ═══════════════════════════════════════════════════════════════ */
 
-// File loading
 fileInput.addEventListener('change', (e) => {
   if (e.target.files[0]) loadImage(e.target.files[0]);
 });
@@ -442,7 +523,6 @@ dropOverlay.addEventListener('drop', (e) => {
   if (file && file.type.startsWith('image/')) loadImage(file);
 });
 
-// Menu toggle
 btnHide.addEventListener('click', () => {
   menu.classList.remove('visible');
   btnShow.classList.add('visible');
@@ -453,7 +533,6 @@ btnShow.addEventListener('click', () => {
   btnShow.classList.remove('visible');
 });
 
-// Pause / Reset
 btnPause.addEventListener('click', () => {
   paused = !paused;
   btnPause.textContent = paused ? 'Resume' : 'Pause';
@@ -471,17 +550,16 @@ btnReset.addEventListener('click', () => {
   showToast('Reset to original');
 });
 
-// Recording
 btnRecord.addEventListener('click', startRecording);
 btnStop.addEventListener('click', stopRecording);
 
-// Load new image
 btnLoadNew.addEventListener('click', () => {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     stopRecording();
   }
   if (animFrame) cancelAnimationFrame(animFrame);
   sourceImage = null;
+  sourceImageData = null;
   dropOverlay.classList.add('visible');
   fileInput.value = '';
 });
