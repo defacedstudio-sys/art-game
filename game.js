@@ -45,6 +45,9 @@ const tog = {
   paint:     document.getElementById('tog-paint'),
   landscape: document.getElementById('tog-landscape'),
   rhythm:    document.getElementById('tog-rhythm'),
+  walkers:   document.getElementById('tog-walkers'),
+  dog:       document.getElementById('tog-dog'),
+  bird:      document.getElementById('tog-bird'),
 };
 
 /* ── STATE ─────────────────────────────────────────────────────── */
@@ -60,6 +63,9 @@ let globalTime = 0; // total elapsed ms for rhythm
 
 let snakes = [];
 let paintStrokes = [];
+let walkerList = [];
+let dogList = [];
+let birdList = [];
 
 let mediaRecorder = null;
 let recordedChunks = [];
@@ -97,6 +103,9 @@ function P() {
     doPaint:     tog.paint.checked,
     doLandscape: tog.landscape.checked,
     doRhythm:    tog.rhythm.checked,
+    doWalkers:   tog.walkers.checked,
+    doDog:       tog.dog.checked,
+    doBird:      tog.bird.checked,
   };
 }
 
@@ -472,6 +481,205 @@ function rhythmMultiplier(bpm, time) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   STICK FIGURE WALKERS — two stick fingers walking together
+   All geometric pixel blocks, no curves.
+═══════════════════════════════════════════════════════════════ */
+function spawnWalker() {
+  const s = 3 + Math.floor(Math.random() * 5); // pixel scale
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  return {
+    x: dir > 0 ? -100 : W + 100,
+    y: H * (0.5 + Math.random() * 0.4),
+    scale: s,
+    dir,
+    speed: 1 + Math.random() * 3,
+    step: 0,
+    srcX: Math.floor(Math.random() * W),
+    srcY: Math.floor(Math.random() * H),
+  };
+}
+
+function drawBlockAt(bx, by, bw, bh, srcOx, srcOy) {
+  const sx = ((srcOx + bx) % W + W) % W;
+  const sy = ((srcOy + by) % H + H) % H;
+  const cw = Math.min(bw, W - sx, W - bx);
+  const ch = Math.min(bh, H - sy, H - by);
+  if (cw > 0 && ch > 0 && bx >= 0 && by >= 0 && bx + cw <= W && by + ch <= H) {
+    ctx.drawImage(sourceCanvas, sx, sy, cw, ch, bx, by, cw, ch);
+  }
+}
+
+function stepWalker(w) {
+  w.x += w.dir * w.speed;
+  w.step += 0.08;
+
+  const s = w.scale;
+  const x = Math.floor(w.x);
+  const y = Math.floor(w.y);
+  const legSwing = Math.sin(w.step) * s * 4;
+  const legSwing2 = Math.sin(w.step + Math.PI) * s * 4;
+
+  // Figure 1 (left)
+  const f1x = x;
+  // Head
+  drawBlockAt(f1x - s*2, y - s*14, s*4, s*4, w.srcX, w.srcY);
+  // Body
+  drawBlockAt(f1x - s, y - s*10, s*2, s*8, w.srcX, w.srcY);
+  // Left leg
+  drawBlockAt(f1x - s*2, y - s*2 + Math.floor(legSwing), s*2, s*6, w.srcX, w.srcY);
+  // Right leg
+  drawBlockAt(f1x, y - s*2 + Math.floor(legSwing2), s*2, s*6, w.srcX, w.srcY);
+  // Left arm
+  const armSwing = Math.sin(w.step + Math.PI) * s * 3;
+  drawBlockAt(f1x - s*3, y - s*9 + Math.floor(armSwing), s*2, s*5, w.srcX, w.srcY);
+  // Right arm
+  drawBlockAt(f1x + s, y - s*9 + Math.floor(-armSwing), s*2, s*5, w.srcX, w.srcY);
+
+  // Figure 2 (partner, walking beside)
+  const f2x = x + w.dir * s * 10;
+  drawBlockAt(f2x - s*2, y - s*13, s*3, s*3, w.srcX + 200, w.srcY + 200);
+  drawBlockAt(f2x - s, y - s*10, s*2, s*7, w.srcX + 200, w.srcY + 200);
+  drawBlockAt(f2x - s*2, y - s*3 + Math.floor(legSwing2), s*2, s*5, w.srcX+200, w.srcY+200);
+  drawBlockAt(f2x, y - s*3 + Math.floor(legSwing), s*2, s*5, w.srcX+200, w.srcY+200);
+  drawBlockAt(f2x - s*3, y - s*8 + Math.floor(-armSwing), s*2, s*4, w.srcX+200, w.srcY+200);
+  drawBlockAt(f2x + s, y - s*8 + Math.floor(armSwing), s*2, s*4, w.srcX+200, w.srcY+200);
+
+  // Off screen? Respawn
+  if (w.dir > 0 && w.x > W + 200) return false;
+  if (w.dir < 0 && w.x < -200) return false;
+  return true;
+}
+
+function updateWalkers() {
+  if (walkerList.length < 2 && Math.random() < 0.005) walkerList.push(spawnWalker());
+  for (let i = walkerList.length - 1; i >= 0; i--) {
+    if (!stepWalker(walkerList[i])) walkerList.splice(i, 1);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DOG — crude geometric pixel dog that trots across the canvas
+═══════════════════════════════════════════════════════════════ */
+function spawnDog() {
+  const s = 3 + Math.floor(Math.random() * 4);
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  return {
+    x: dir > 0 ? -150 : W + 150,
+    y: H * (0.55 + Math.random() * 0.35),
+    scale: s,
+    dir,
+    speed: 1.5 + Math.random() * 2.5,
+    step: 0,
+    srcX: Math.floor(Math.random() * W),
+    srcY: Math.floor(Math.random() * H),
+    tailWag: 0,
+  };
+}
+
+function stepDog(d) {
+  d.x += d.dir * d.speed;
+  d.step += 0.1;
+  d.tailWag += 0.25;
+
+  const s = d.scale;
+  const x = Math.floor(d.x);
+  const y = Math.floor(d.y);
+  const legF = Math.sin(d.step) * s * 3;
+  const legB = Math.sin(d.step + Math.PI) * s * 3;
+  const flip = d.dir;
+
+  // Body (long rectangle)
+  drawBlockAt(x - s*8, y - s*6, s*16, s*6, d.srcX, d.srcY);
+  // Head
+  const headX = x + flip * s * 8;
+  drawBlockAt(headX - s*3, y - s*9, s*6, s*5, d.srcX, d.srcY);
+  // Snout
+  drawBlockAt(headX + flip * s*2, y - s*7, s*3, s*2, d.srcX, d.srcY);
+  // Ear
+  drawBlockAt(headX - s, y - s*11, s*2, s*3, d.srcX, d.srcY);
+  // Front legs
+  drawBlockAt(x + flip*s*4, y + Math.floor(legF), s*2, s*6, d.srcX, d.srcY);
+  drawBlockAt(x + flip*s*6, y + Math.floor(legB), s*2, s*6, d.srcX, d.srcY);
+  // Back legs
+  drawBlockAt(x - flip*s*5, y + Math.floor(legB), s*2, s*6, d.srcX, d.srcY);
+  drawBlockAt(x - flip*s*7, y + Math.floor(legF), s*2, s*6, d.srcX, d.srcY);
+  // Tail (wags!)
+  const tailAngle = Math.sin(d.tailWag) * s * 3;
+  drawBlockAt(x - flip*s*9, y - s*7 + Math.floor(tailAngle), s*2, s*4, d.srcX, d.srcY);
+
+  if (d.dir > 0 && d.x > W + 250) return false;
+  if (d.dir < 0 && d.x < -250) return false;
+  return true;
+}
+
+function updateDogs() {
+  if (dogList.length < 2 && Math.random() < 0.003) dogList.push(spawnDog());
+  for (let i = dogList.length - 1; i >= 0; i--) {
+    if (!stepDog(dogList[i])) dogList.splice(i, 1);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BIRD — geometric pixel bird that flaps across the sky
+═══════════════════════════════════════════════════════════════ */
+function spawnBird() {
+  const s = 2 + Math.floor(Math.random() * 4);
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  return {
+    x: dir > 0 ? -120 : W + 120,
+    y: H * (0.05 + Math.random() * 0.4),
+    scale: s,
+    dir,
+    speed: 2 + Math.random() * 4,
+    flap: 0,
+    flapSpeed: 0.12 + Math.random() * 0.08,
+    srcX: Math.floor(Math.random() * W),
+    srcY: Math.floor(Math.random() * H),
+    bobble: 0,
+  };
+}
+
+function stepBird(b) {
+  b.x += b.dir * b.speed;
+  b.flap += b.flapSpeed;
+  b.bobble += 0.04;
+
+  const s = b.scale;
+  const x = Math.floor(b.x);
+  const yBob = Math.sin(b.bobble) * s * 2;
+  const y = Math.floor(b.y + yBob);
+  const wingAngle = Math.sin(b.flap); // -1 to 1
+  const wingUp = Math.floor(wingAngle * s * 6);
+
+  // Body (small rectangle)
+  drawBlockAt(x - s*2, y - s, s*4, s*2, b.srcX, b.srcY);
+  // Head
+  const headX = x + b.dir * s * 3;
+  drawBlockAt(headX - s, y - s*2, s*2, s*2, b.srcX, b.srcY);
+  // Beak
+  drawBlockAt(headX + b.dir * s, y - s, s*2, s, b.srcX, b.srcY);
+  // Left wing
+  drawBlockAt(x - s*6, y - s*2 - wingUp, s*4, s*2, b.srcX, b.srcY);
+  drawBlockAt(x - s*9, y - s*2 - wingUp*1.5, s*3, s, b.srcX, b.srcY);
+  // Right wing
+  drawBlockAt(x + s*2, y - s*2 - wingUp, s*4, s*2, b.srcX, b.srcY);
+  drawBlockAt(x + s*6, y - s*2 - wingUp*1.5, s*3, s, b.srcX, b.srcY);
+  // Tail
+  drawBlockAt(x - b.dir*s*3, y - s*2, s*2, s*3, b.srcX, b.srcY);
+
+  if (b.dir > 0 && b.x > W + 200) return false;
+  if (b.dir < 0 && b.x < -200) return false;
+  return true;
+}
+
+function updateBirds() {
+  if (birdList.length < 3 && Math.random() < 0.008) birdList.push(spawnBird());
+  for (let i = birdList.length - 1; i >= 0; i--) {
+    if (!stepBird(birdList[i])) birdList.splice(i, 1);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
    ANIMATION LOOP
 ═══════════════════════════════════════════════════════════════ */
 function startAnimation() {
@@ -480,6 +688,9 @@ function startAnimation() {
   globalTime = 0;
   snakes = [];
   paintStrokes = [];
+  walkerList = [];
+  dogList = [];
+  birdList = [];
   lastTime = performance.now();
   paused = false;
   btnPause.textContent = 'Pause';
@@ -541,6 +752,15 @@ function tick(now) {
     const paintSteps = Math.max(1, Math.floor(2 * rmult));
     for (let s=0; s<paintSteps; s++) updatePaint(p);
   }
+
+  // ── WALKERS ──
+  if (p.doWalkers) updateWalkers();
+
+  // ── DOG ──
+  if (p.doDog) updateDogs();
+
+  // ── BIRD ──
+  if (p.doBird) updateBirds();
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -608,7 +828,7 @@ btnPause.addEventListener('click', () => {
 });
 btnReset.addEventListener('click', () => {
   if (sourceCanvas) { ctx.clearRect(0,0,W,H); ctx.drawImage(sourceCanvas,0,0); }
-  stampAccum=0; snakes=[]; paintStrokes=[];
+  stampAccum=0; snakes=[]; paintStrokes=[]; walkerList=[]; dogList=[]; birdList=[];
   showToast('Reset');
 });
 btnRecord.addEventListener('click', startRecording);
@@ -616,7 +836,7 @@ btnStop.addEventListener('click', stopRecording);
 btnLoadNew.addEventListener('click', () => {
   if (mediaRecorder && mediaRecorder.state!=='inactive') stopRecording();
   if (animFrame) cancelAnimationFrame(animFrame);
-  sourceImage=null; sourceData=null; snakes=[]; paintStrokes=[];
+  sourceImage=null; sourceData=null; snakes=[]; paintStrokes=[]; walkerList=[]; dogList=[]; birdList=[];
   dropOverlay.classList.add('visible');
   fileInput.value='';
 });
