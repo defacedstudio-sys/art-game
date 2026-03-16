@@ -2,12 +2,10 @@
 
 /* ═══════════════════════════════════════════════════════════════
    ABSTRACT ART — PIXEL CHUNK STACKER
-   Samples geometric tetris-like chunks from source artwork and
-   stamps them permanently onto the canvas, building layers.
-   Supports stripes, clumps, weird shapes, white-biased sampling.
+   Fast engine: pre-generates shape pool, stamps by filling cells
+   directly — no expensive outline tracing per frame.
 ═══════════════════════════════════════════════════════════════ */
 
-/* ── DOM ───────────────────────────────────────────────────────── */
 const canvas      = document.getElementById('main-canvas');
 const ctx         = canvas.getContext('2d');
 const dropOverlay = document.getElementById('drop-overlay');
@@ -40,21 +38,25 @@ const sliders = {
 let sourceImage = null;
 let sourceCanvas = null;
 let sourceCtx = null;
-let sourceImageData = null; // for white-bias sampling
+let sourceData = null;
 let paused = false;
 let animFrame = null;
 let lastTime = 0;
 let stampAccum = 0;
 
-// Recording
 let mediaRecorder = null;
 let recordedChunks = [];
 let recordStartTime = 0;
 let recordTimerInterval = null;
 
-// Canvas dimensions (>2000px)
 const CANVAS_W = 4800;
 const CANVAS_H = 2700;
+
+// Pre-generated shape pools for speed
+let shapePoolStripes = [];
+let shapePoolClumps = [];
+let shapePoolWeird = [];
+const POOL_SIZE = 200;
 
 /* ── PARAMS ────────────────────────────────────────────────────── */
 function getParams() {
@@ -67,7 +69,7 @@ function getParams() {
     restore:    parseInt(sliders.restore.value) / 100,
     drift:      parseInt(sliders.drift.value) / 100,
     whiteBias:  parseInt(sliders.whiteBias.value) / 100,
-    shapeStyle: parseInt(sliders.shapeStyle.value) / 100, // 0=stripes, 1=clumps
+    shapeStyle: parseInt(sliders.shapeStyle.value) / 100,
   };
 }
 
@@ -81,6 +83,7 @@ function loadImage(file) {
     img.onload = () => {
       sourceImage = img;
       initSourceCanvas();
+      buildShapePools();
       dropOverlay.classList.remove('visible');
       startAnimation();
       showToast('Artwork loaded — chunks stacking');
@@ -114,269 +117,192 @@ function initSourceCanvas() {
     sy = (sourceImage.height - sh) / 2;
   }
   sourceCtx.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, CANVAS_W, CANVAS_H);
-
-  // Cache pixel data for white-bias sampling
-  sourceImageData = sourceCtx.getImageData(0, 0, CANVAS_W, CANVAS_H);
-
+  sourceData = sourceCtx.getImageData(0, 0, CANVAS_W, CANVAS_H);
   ctx.drawImage(sourceCanvas, 0, 0);
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   WHITE-BIAS SAMPLING
-   Picks source positions biased towards whiter/lighter areas.
+   SHAPE POOL — pre-generate shapes once, reuse at stamp time.
+   Each shape is an array of [row, col] cell offsets (normalized).
 ═══════════════════════════════════════════════════════════════ */
 
-function getWhiteness(x, y, w, h) {
-  if (!sourceImageData) return 0.5;
-  const data = sourceImageData.data;
-  // Sample a few random pixels in the region for speed
-  const samples = Math.min(12, w * h);
-  let totalBrightness = 0;
-  for (let i = 0; i < samples; i++) {
-    const sx = Math.floor(x + Math.random() * w);
-    const sy = Math.floor(y + Math.random() * h);
-    const idx = (sy * CANVAS_W + sx) * 4;
-    const r = data[idx] || 0;
-    const g = data[idx + 1] || 0;
-    const b = data[idx + 2] || 0;
-    totalBrightness += (r + g + b) / (3 * 255);
+function growPolyomino(numCells, mode) {
+  // mode: 'stripe' | 'clump' | 'weird'
+  const cells = [[0, 0]];
+  const cellSet = new Set();
+  cellSet.add('0,0');
+
+  let prefDir = Math.random() < 0.5 ? 0 : 1; // 0=vertical, 1=horizontal
+  const dirs = [[-1,0],[1,0],[0,-1],[0,1]]; // up,down,left,right
+
+  for (let i = 1; i < numCells; i++) {
+    // Collect frontier
+    const frontier = [];
+    for (const [r, c] of cells) {
+      for (let d = 0; d < 4; d++) {
+        const nr = r + dirs[d][0];
+        const nc = c + dirs[d][1];
+        if (!cellSet.has(nr + ',' + nc)) {
+          frontier.push([nr, nc, d]);
+        }
+      }
+    }
+    if (frontier.length === 0) break;
+
+    let pick;
+    if (mode === 'stripe') {
+      // Strongly prefer the current direction axis
+      const preferred = frontier.filter(f =>
+        prefDir === 0 ? (f[2] < 2) : (f[2] >= 2)
+      );
+      pick = (preferred.length > 0 && Math.random() < 0.88)
+        ? preferred[Math.floor(Math.random() * preferred.length)]
+        : frontier[Math.floor(Math.random() * frontier.length)];
+    } else if (mode === 'clump') {
+      // Prefer cells with more existing neighbors (compact)
+      let bestCount = -1;
+      const scored = frontier.map(f => {
+        let n = 0;
+        for (const d of dirs) {
+          if (cellSet.has((f[0]+d[0]) + ',' + (f[1]+d[1]))) n++;
+        }
+        return { f, n };
+      });
+      scored.sort((a, b) => b.n - a.n);
+      const top = scored.slice(0, Math.max(1, Math.ceil(scored.length * 0.4)));
+      pick = top[Math.floor(Math.random() * top.length)].f;
+    } else {
+      // Weird: random with occasional direction flips
+      pick = frontier[Math.floor(Math.random() * frontier.length)];
+      if (Math.random() < 0.2) prefDir = 1 - prefDir;
+    }
+
+    cells.push([pick[0], pick[1]]);
+    cellSet.add(pick[0] + ',' + pick[1]);
   }
-  return totalBrightness / samples;
+
+  // Normalize
+  const minR = Math.min(...cells.map(c => c[0]));
+  const minC = Math.min(...cells.map(c => c[1]));
+  return cells.map(([r, c]) => [r - minR, c - minC]);
 }
 
-function pickSourcePosition(w, h, whiteBias) {
+function buildShapePools() {
+  shapePoolStripes = [];
+  shapePoolClumps = [];
+  shapePoolWeird = [];
+
+  for (let i = 0; i < POOL_SIZE; i++) {
+    const n = 3 + Math.floor(Math.random() * 25);
+    shapePoolStripes.push(growPolyomino(n, 'stripe'));
+    shapePoolClumps.push(growPolyomino(n, 'clump'));
+    shapePoolWeird.push(growPolyomino(n, 'weird'));
+  }
+}
+
+function pickShape(shapeStyle) {
+  const idx = Math.floor(Math.random() * POOL_SIZE);
+  if (shapeStyle < 0.33) return shapePoolStripes[idx];
+  if (shapeStyle > 0.66) return shapePoolClumps[idx];
+  return shapePoolWeird[idx];
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   WHITE BIAS SAMPLING
+═══════════════════════════════════════════════════════════════ */
+
+function sampleBrightness(x, y, w, h) {
+  const d = sourceData.data;
+  let total = 0;
+  const steps = 8;
+  for (let i = 0; i < steps; i++) {
+    const px = Math.min(CANVAS_W - 1, Math.floor(x + Math.random() * w));
+    const py = Math.min(CANVAS_H - 1, Math.floor(y + Math.random() * h));
+    const idx = (py * CANVAS_W + px) * 4;
+    total += (d[idx] + d[idx+1] + d[idx+2]) / 765;
+  }
+  return total / steps;
+}
+
+function pickSourceXY(w, h, whiteBias) {
+  const maxX = Math.max(0, CANVAS_W - w);
+  const maxY = Math.max(0, CANVAS_H - h);
+
   if (whiteBias < 0.05) {
-    // No bias — pure random
-    return [
-      Math.floor(Math.random() * Math.max(1, CANVAS_W - w)),
-      Math.floor(Math.random() * Math.max(1, CANVAS_H - h)),
-    ];
+    return [Math.floor(Math.random() * maxX), Math.floor(Math.random() * maxY)];
   }
 
-  // Try multiple candidates, pick the whitest one weighted by bias
-  const attempts = Math.floor(3 + whiteBias * 20); // 3-23 attempts
   let bestX = 0, bestY = 0, bestScore = -1;
-
-  for (let i = 0; i < attempts; i++) {
-    const cx = Math.floor(Math.random() * Math.max(1, CANVAS_W - w));
-    const cy = Math.floor(Math.random() * Math.max(1, CANVAS_H - h));
-    const whiteness = getWhiteness(cx, cy, w, h);
-    // Score: blend between random (0.5) and whiteness based on bias
-    const score = (1 - whiteBias) * Math.random() + whiteBias * whiteness;
+  const tries = 3 + Math.floor(whiteBias * 15);
+  for (let i = 0; i < tries; i++) {
+    const cx = Math.floor(Math.random() * maxX);
+    const cy = Math.floor(Math.random() * maxY);
+    const brightness = sampleBrightness(cx, cy, w, h);
+    const score = (1 - whiteBias) * Math.random() + whiteBias * brightness;
     if (score > bestScore) {
       bestScore = score;
       bestX = cx;
       bestY = cy;
     }
   }
-
   return [bestX, bestY];
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SHAPE GENERATION
-   shapeStyle: 0 = long stripes, 0.5 = mixed/weird, 1 = fat clumps
-═══════════════════════════════════════════════════════════════ */
-
-function generateShape(cellSize, maxEdges, shapeStyle) {
-  const targetEdges = 4 + Math.floor(Math.random() * (maxEdges - 4));
-  const numCells = Math.max(2, Math.min(60, Math.ceil(targetEdges / 2.2)));
-
-  const cells = new Set();
-  cells.add('0,0');
-
-  // Track a "direction" for stripe-like growth
-  // shapeStyle 0 = strongly directional (stripes)
-  // shapeStyle 1 = purely random (clumpy)
-  // in between = weird mixed shapes
-  const dirBias = 1 - shapeStyle; // 1 = full stripe, 0 = full clump
-  let prefDir = Math.random() < 0.5 ? 'h' : 'v'; // preferred axis
-
-  for (let i = 1; i < numCells; i++) {
-    const candidates = [];
-    const preferred = [];
-
-    for (const key of cells) {
-      const [r, c] = key.split(',').map(Number);
-      const neighbors = [
-        { pos: [r-1, c], axis: 'v' },
-        { pos: [r+1, c], axis: 'v' },
-        { pos: [r, c-1], axis: 'h' },
-        { pos: [r, c+1], axis: 'h' },
-      ];
-      for (const n of neighbors) {
-        const nk = `${n.pos[0]},${n.pos[1]}`;
-        if (!cells.has(nk)) {
-          candidates.push(nk);
-          if (n.axis === prefDir) preferred.push(nk);
-        }
-      }
-    }
-
-    if (candidates.length === 0) break;
-
-    // Mix between preferred direction and random based on shapeStyle
-    let pick;
-    if (preferred.length > 0 && Math.random() < dirBias * 0.85) {
-      pick = preferred[Math.floor(Math.random() * preferred.length)];
-    } else {
-      pick = candidates[Math.floor(Math.random() * candidates.length)];
-    }
-
-    // Occasionally switch direction for weird shapes (mid-range style)
-    if (shapeStyle > 0.2 && shapeStyle < 0.8 && Math.random() < 0.15) {
-      prefDir = prefDir === 'h' ? 'v' : 'h';
-    }
-
-    cells.add(pick);
-  }
-
-  const cellCoords = [];
-  for (const key of cells) {
-    const [r, c] = key.split(',').map(Number);
-    cellCoords.push([r, c]);
-  }
-
-  const minR = Math.min(...cellCoords.map(c => c[0]));
-  const minC = Math.min(...cellCoords.map(c => c[1]));
-  const normalized = cellCoords.map(([r, c]) => [r - minR, c - minC]);
-
-  return buildOutlinePath(normalized, cellSize);
-}
-
-function buildOutlinePath(cells, cellSize) {
-  const cellSet = new Set(cells.map(([r, c]) => `${r},${c}`));
-  const maxR = Math.max(...cells.map(c => c[0]));
-  const maxC = Math.max(...cells.map(c => c[1]));
-
-  const edges = [];
-  for (const [r, c] of cells) {
-    const x = c * cellSize;
-    const y = r * cellSize;
-    if (!cellSet.has(`${r-1},${c}`))
-      edges.push({ x1: x, y1: y, x2: x + cellSize, y2: y });
-    if (!cellSet.has(`${r+1},${c}`))
-      edges.push({ x1: x, y1: y + cellSize, x2: x + cellSize, y2: y + cellSize });
-    if (!cellSet.has(`${r},${c-1}`))
-      edges.push({ x1: x, y1: y, x2: x, y2: y + cellSize });
-    if (!cellSet.has(`${r},${c+1}`))
-      edges.push({ x1: x + cellSize, y1: y, x2: x + cellSize, y2: y + cellSize });
-  }
-
-  const path = traceOutline(edges);
-
-  return {
-    path,
-    cells,
-    cellSize,
-    width: (maxC + 1) * cellSize,
-    height: (maxR + 1) * cellSize,
-    edgeCount: path.length,
-  };
-}
-
-function traceOutline(edges) {
-  if (edges.length === 0) return [[0, 0]];
-
-  const vertexEdges = new Map();
-  const addEdge = (x1, y1, x2, y2) => {
-    const k1 = `${x1},${y1}`;
-    const k2 = `${x2},${y2}`;
-    if (!vertexEdges.has(k1)) vertexEdges.set(k1, []);
-    if (!vertexEdges.has(k2)) vertexEdges.set(k2, []);
-    vertexEdges.get(k1).push(k2);
-    vertexEdges.get(k2).push(k1);
-  };
-
-  for (const e of edges) {
-    addEdge(e.x1, e.y1, e.x2, e.y2);
-  }
-
-  const vertices = [...vertexEdges.keys()].sort((a, b) => {
-    const [ax, ay] = a.split(',').map(Number);
-    const [bx, by] = b.split(',').map(Number);
-    return ay - by || ax - bx;
-  });
-
-  if (vertices.length === 0) return [[0, 0]];
-
-  const start = vertices[0];
-  const path = [];
-  const visited = new Set();
-  let current = start;
-
-  for (let safety = 0; safety < 2000; safety++) {
-    const [cx, cy] = current.split(',').map(Number);
-    path.push([cx, cy]);
-
-    const neighbors = vertexEdges.get(current) || [];
-    const edgeKey = (a, b) => a < b ? `${a}|${b}` : `${b}|${a}`;
-
-    let next = null;
-    for (const n of neighbors) {
-      const ek = edgeKey(current, n);
-      if (!visited.has(ek)) {
-        visited.add(ek);
-        next = n;
-        break;
-      }
-    }
-
-    if (!next || next === start) break;
-    current = next;
-  }
-
-  return path;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   STAMP A CHUNK — permanently paste onto the canvas
+   STAMP — fast cell-based rendering, no outline tracing
 ═══════════════════════════════════════════════════════════════ */
 
 function stampChunk() {
   const p = getParams();
+
+  // Pick a pre-generated shape
+  const cells = pickShape(p.shapeStyle);
+
+  // Cell pixel size based on min/max size sliders
   const size = p.minSize + Math.random() * (p.maxSize - p.minSize);
-  const cellSize = Math.max(2, Math.floor(size / (2 + Math.random() * 6)));
+  const cellPx = Math.max(2, Math.floor(size / Math.max(1, Math.sqrt(cells.length))));
 
-  const shape = generateShape(cellSize, p.maxEdges, p.shapeStyle);
-  if (shape.width < 2 || shape.height < 2) return;
+  // Bounding box of the shape
+  let maxR = 0, maxC = 0;
+  for (const [r, c] of cells) {
+    if (r > maxR) maxR = r;
+    if (c > maxC) maxC = c;
+  }
+  const shapeW = (maxC + 1) * cellPx;
+  const shapeH = (maxR + 1) * cellPx;
 
-  // Source: where to grab pixels from the ORIGINAL artwork
-  const [srcX, srcY] = pickSourcePosition(shape.width, shape.height, p.whiteBias);
+  if (shapeW < 2 || shapeH < 2) return;
 
-  // Destination: COMPLETELY INDEPENDENT random position on the canvas
-  // This is what makes the composition actually change — pixels migrate
-  let destX = Math.floor(Math.random() * (CANVAS_W - shape.width));
-  let destY = Math.floor(Math.random() * (CANVAS_H - shape.height));
+  // Source: where to grab pixels from original
+  const [srcX, srcY] = pickSourceXY(shapeW, shapeH, p.whiteBias);
 
-  // Drift slider blends between full-random placement (0) and
-  // same-position-as-source (1) — so at 0 it's maximum chaos
-  if (p.drift > 0) {
+  // Destination: FULLY RANDOM position on canvas (independent of source)
+  let destX = Math.floor(Math.random() * CANVAS_W) - Math.floor(shapeW / 2);
+  let destY = Math.floor(Math.random() * CANVAS_H) - Math.floor(shapeH / 2);
+
+  // Drift: 0 = full scramble (dest is random), 1 = dest matches source
+  if (p.drift > 0.01) {
     destX = Math.round(destX * (1 - p.drift) + srcX * p.drift);
     destY = Math.round(destY * (1 - p.drift) + srcY * p.drift);
   }
 
-  // Stamp with clip path
-  ctx.save();
-  ctx.beginPath();
-  if (shape.path.length > 1) {
-    ctx.moveTo(shape.path[0][0] + destX, shape.path[0][1] + destY);
-    for (let i = 1; i < shape.path.length; i++) {
-      ctx.lineTo(shape.path[i][0] + destX, shape.path[i][1] + destY);
-    }
-    ctx.closePath();
-  } else {
-    ctx.rect(destX, destY, shape.width, shape.height);
+  // Stamp each cell directly — fast, no path tracing needed
+  for (const [r, c] of cells) {
+    const dx = destX + c * cellPx;
+    const dy = destY + r * cellPx;
+    const sx = srcX + c * cellPx;
+    const sy = srcY + r * cellPx;
+
+    // Bounds check
+    if (dx < -cellPx || dx > CANVAS_W || dy < -cellPx || dy > CANVAS_H) continue;
+    if (sx < 0 || sx + cellPx > CANVAS_W || sy < 0 || sy + cellPx > CANVAS_H) continue;
+
+    ctx.drawImage(
+      sourceCanvas,
+      sx, sy, cellPx, cellPx,
+      dx, dy, cellPx, cellPx
+    );
   }
-  ctx.clip();
-
-  ctx.drawImage(
-    sourceCanvas,
-    srcX, srcY, shape.width, shape.height,
-    destX, destY, shape.width, shape.height
-  );
-
-  ctx.restore();
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -394,44 +320,40 @@ function startAnimation() {
 
 function tick(now) {
   animFrame = requestAnimationFrame(tick);
-
   if (!sourceImage || paused) return;
 
   if (!now) now = performance.now();
-  const dt = Math.min(now - lastTime, 100);
+  const dt = Math.min(now - lastTime, 50);
   lastTime = now;
 
   const p = getParams();
 
-  // Restore slider: blend back towards original
+  // Restore: blend towards original
   if (p.restore > 0) {
     ctx.save();
-    ctx.globalAlpha = p.restore * 0.15;
+    ctx.globalAlpha = p.restore * 0.2;
     ctx.drawImage(sourceCanvas, 0, 0);
     ctx.restore();
   }
 
-  const chunksPerSec = 2 + (p.speed / 100) * 198;
-  const densityMult = p.density;
+  // Stamps per frame: speed controls rate, density multiplies
+  // At speed 1: ~1 per frame, speed 100: ~60 per frame
+  // Density multiplies that further
+  const stampsThisFrame = Math.max(1,
+    Math.floor((p.speed / 100) * 60 * (p.density / 10))
+  );
 
-  stampAccum += dt;
-  const interval = 1000 / chunksPerSec;
-
-  while (stampAccum >= interval) {
-    stampAccum -= interval;
-    for (let d = 0; d < densityMult; d++) {
-      stampChunk();
-    }
+  for (let i = 0; i < stampsThisFrame; i++) {
+    stampChunk();
   }
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   MP4 RECORDING
+   RECORDING
 ═══════════════════════════════════════════════════════════════ */
 
 function startRecording() {
   const stream = canvas.captureStream(30);
-
   const mimeTypes = [
     'video/webm;codecs=vp9',
     'video/webm;codecs=vp8',
@@ -441,61 +363,44 @@ function startRecording() {
 
   let mimeType = '';
   for (const mt of mimeTypes) {
-    if (MediaRecorder.isTypeSupported(mt)) {
-      mimeType = mt;
-      break;
-    }
+    if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
   }
 
-  if (!mimeType) {
-    showToast('Recording not supported in this browser');
-    return;
-  }
+  if (!mimeType) { showToast('Recording not supported'); return; }
 
   recordedChunks = [];
-  mediaRecorder = new MediaRecorder(stream, {
-    mimeType,
-    videoBitsPerSecond: 8000000,
-  });
-
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data.size > 0) recordedChunks.push(e.data);
-  };
-
+  mediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
+  mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = () => {
     const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
     const blob = new Blob(recordedChunks, { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `art-chunk-animation-${Date.now()}.${ext}`;
+    a.download = `art-chunk-${Date.now()}.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
-    showToast(`Recording saved as .${ext}`);
+    showToast(`Saved as .${ext}`);
   };
 
   mediaRecorder.start(100);
   recordStartTime = Date.now();
-
   btnRecord.disabled = true;
   btnStop.disabled = false;
   recordStatus.classList.remove('hidden');
 
   recordTimerInterval = setInterval(() => {
     const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
-    const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
-    const secs = String(elapsed % 60).padStart(2, '0');
-    recordTime.textContent = `${mins}:${secs}`;
+    const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    recordTime.textContent = `${m}:${s}`;
   }, 500);
 
-  showToast('Recording — adjust sliders to program the output');
+  showToast('Recording — adjust sliders to program output');
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-  }
-
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
   clearInterval(recordTimerInterval);
   btnRecord.disabled = false;
   btnStop.disabled = true;
@@ -504,52 +409,31 @@ function stopRecording() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   EVENT HANDLERS
+   EVENTS
 ═══════════════════════════════════════════════════════════════ */
 
-fileInput.addEventListener('change', (e) => {
-  if (e.target.files[0]) loadImage(e.target.files[0]);
-});
+fileInput.addEventListener('change', (e) => { if (e.target.files[0]) loadImage(e.target.files[0]); });
 
-dropOverlay.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropOverlay.classList.add('dragover');
-});
-
-dropOverlay.addEventListener('dragleave', () => {
-  dropOverlay.classList.remove('dragover');
-});
-
+dropOverlay.addEventListener('dragover', (e) => { e.preventDefault(); dropOverlay.classList.add('dragover'); });
+dropOverlay.addEventListener('dragleave', () => { dropOverlay.classList.remove('dragover'); });
 dropOverlay.addEventListener('drop', (e) => {
   e.preventDefault();
   dropOverlay.classList.remove('dragover');
-  const file = e.dataTransfer.files[0];
-  if (file && file.type.startsWith('image/')) loadImage(file);
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) loadImage(f);
 });
 
-btnHide.addEventListener('click', () => {
-  menu.classList.remove('visible');
-  btnShow.classList.add('visible');
-});
-
-btnShow.addEventListener('click', () => {
-  menu.classList.add('visible');
-  btnShow.classList.remove('visible');
-});
+btnHide.addEventListener('click', () => { menu.classList.remove('visible'); btnShow.classList.add('visible'); });
+btnShow.addEventListener('click', () => { menu.classList.add('visible'); btnShow.classList.remove('visible'); });
 
 btnPause.addEventListener('click', () => {
   paused = !paused;
   btnPause.textContent = paused ? 'Resume' : 'Pause';
-  if (!paused) {
-    lastTime = performance.now();
-  }
+  if (!paused) lastTime = performance.now();
 });
 
 btnReset.addEventListener('click', () => {
-  if (sourceCanvas) {
-    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-    ctx.drawImage(sourceCanvas, 0, 0);
-  }
+  if (sourceCanvas) { ctx.clearRect(0, 0, CANVAS_W, CANVAS_H); ctx.drawImage(sourceCanvas, 0, 0); }
   stampAccum = 0;
   showToast('Reset to original');
 });
@@ -558,27 +442,19 @@ btnRecord.addEventListener('click', startRecording);
 btnStop.addEventListener('click', stopRecording);
 
 btnLoadNew.addEventListener('click', () => {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    stopRecording();
-  }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') stopRecording();
   if (animFrame) cancelAnimationFrame(animFrame);
   sourceImage = null;
-  sourceImageData = null;
+  sourceData = null;
   dropOverlay.classList.add('visible');
   fileInput.value = '';
 });
 
-/* ═══════════════════════════════════════════════════════════════
-   TOAST
-═══════════════════════════════════════════════════════════════ */
 function showToast(msg) {
   toast.textContent = msg;
   toast.classList.add('visible');
   setTimeout(() => toast.classList.remove('visible'), 2500);
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   INIT
-═══════════════════════════════════════════════════════════════ */
 canvas.width = CANVAS_W;
 canvas.height = CANVAS_H;
