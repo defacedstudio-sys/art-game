@@ -341,16 +341,20 @@ function stampChunk() {
   const shape = generateShape(cellSize, p.maxEdges, p.shapeStyle);
   if (shape.width < 2 || shape.height < 2) return;
 
-  // Pick source position with white bias
+  // Source: where to grab pixels from the ORIGINAL artwork
   const [srcX, srcY] = pickSourcePosition(shape.width, shape.height, p.whiteBias);
 
-  // Destination offset
-  const driftRange = p.drift * 400;
-  let destX = srcX + Math.round((Math.random() - 0.5) * driftRange);
-  let destY = srcY + Math.round((Math.random() - 0.5) * driftRange);
+  // Destination: COMPLETELY INDEPENDENT random position on the canvas
+  // This is what makes the composition actually change — pixels migrate
+  let destX = Math.floor(Math.random() * (CANVAS_W - shape.width));
+  let destY = Math.floor(Math.random() * (CANVAS_H - shape.height));
 
-  destX = Math.max(-shape.width / 2, Math.min(CANVAS_W - shape.width / 2, destX));
-  destY = Math.max(-shape.height / 2, Math.min(CANVAS_H - shape.height / 2, destY));
+  // Drift slider blends between full-random placement (0) and
+  // same-position-as-source (1) — so at 0 it's maximum chaos
+  if (p.drift > 0) {
+    destX = Math.round(destX * (1 - p.drift) + srcX * p.drift);
+    destY = Math.round(destY * (1 - p.drift) + srcY * p.drift);
+  }
 
   // Stamp with clip path
   ctx.save();
