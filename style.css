@@ -157,6 +157,38 @@ html, body {
   color: rgba(255,255,255,0.25);
 }
 
+/* ── Toggle row ────────────────────────────────────────────────── */
+.toggle-row {
+  flex-direction: row !important;
+  flex-wrap: wrap;
+  gap: 6px !important;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  user-select: none;
+}
+
+.toggle-label:has(input:checked) {
+  background: rgba(124, 110, 240, 0.2);
+  border-color: rgba(124, 110, 240, 0.4);
+  color: var(--text);
+}
+
+.toggle-label input {
+  display: none;
+}
+
 /* ── Sliders ───────────────────────────────────────────────────── */
 input[type="range"] {
   -webkit-appearance: none;
