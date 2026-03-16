@@ -25,11 +25,20 @@
   <div id="menu" class="visible">
     <div id="menu-header">
       <span class="menu-title">Controls</span>
-      <button id="btn-hide-menu" title="Hide menu">✕</button>
+      <button id="btn-hide-menu" title="Hide menu">&#x2715;</button>
+    </div>
+
+    <!-- Toggles -->
+    <div class="menu-section toggle-row">
+      <label class="toggle-label"><input type="checkbox" id="tog-chunks" checked /><span>Chunks</span></label>
+      <label class="toggle-label"><input type="checkbox" id="tog-snakes" checked /><span>Snakes</span></label>
+      <label class="toggle-label"><input type="checkbox" id="tog-paint" checked /><span>Paint</span></label>
+      <label class="toggle-label"><input type="checkbox" id="tog-landscape" /><span>Landscape</span></label>
+      <label class="toggle-label"><input type="checkbox" id="tog-rhythm" /><span>Rhythm</span></label>
     </div>
 
     <div class="menu-section">
-      <label>Chunk Speed</label>
+      <label>Speed</label>
       <input type="range" id="speed-slider" min="1" max="100" value="30" />
       <div class="range-labels"><span>Slow</span><span>Fast</span></div>
     </div>
@@ -47,7 +56,7 @@
     </div>
 
     <div class="menu-section">
-      <label>Chunk Density</label>
+      <label>Density</label>
       <input type="range" id="density-slider" min="1" max="50" value="12" />
       <div class="range-labels"><span>Sparse</span><span>Dense</span></div>
     </div>
@@ -71,27 +80,45 @@
     </div>
 
     <div class="menu-section">
-      <label>Wanderers</label>
+      <label>Snakes</label>
       <input type="range" id="wanderer-slider" min="0" max="30" value="5" />
-      <div class="range-labels"><span>None</span><span>30 creatures</span></div>
+      <div class="range-labels"><span>None</span><span>30</span></div>
     </div>
 
     <div class="menu-section">
-      <label>Wanderer Width</label>
+      <label>Snake Width</label>
       <input type="range" id="wanderer-width-slider" min="4" max="120" value="20" />
       <div class="range-labels"><span>Thin</span><span>Thick</span></div>
     </div>
 
     <div class="menu-section">
-      <label>Restore Original</label>
-      <input type="range" id="restore-slider" min="0" max="100" value="0" />
-      <div class="range-labels"><span>Animated</span><span>Original</span></div>
+      <label>Paint Strokes</label>
+      <input type="range" id="paint-slider" min="0" max="20" value="4" />
+      <div class="range-labels"><span>None</span><span>20</span></div>
+    </div>
+
+    <div class="menu-section">
+      <label>Paint Size</label>
+      <input type="range" id="paint-size-slider" min="10" max="400" value="60" />
+      <div class="range-labels"><span>Small</span><span>Large</span></div>
+    </div>
+
+    <div class="menu-section">
+      <label>Rhythm BPM</label>
+      <input type="range" id="rhythm-slider" min="40" max="200" value="90" />
+      <div class="range-labels"><span>40</span><span>200</span></div>
     </div>
 
     <div class="menu-section">
       <label>Scramble</label>
       <input type="range" id="drift-slider" min="0" max="100" value="0" />
       <div class="range-labels"><span>Full Chaos</span><span>Stay in Place</span></div>
+    </div>
+
+    <div class="menu-section">
+      <label>Restore Original</label>
+      <input type="range" id="restore-slider" min="0" max="100" value="0" />
+      <div class="range-labels"><span>Animated</span><span>Original</span></div>
     </div>
 
     <div class="menu-section menu-buttons">
@@ -114,7 +141,7 @@
     </div>
   </div>
 
-  <button id="btn-show-menu" class="hidden" title="Show menu">☰</button>
+  <button id="btn-show-menu" class="hidden" title="Show menu">&#x2630;</button>
 
   <div id="toast" aria-live="polite"></div>
 

@@ -1,8 +1,9 @@
 'use strict';
 
 /* ═══════════════════════════════════════════════════════════════
-   ABSTRACT ART — PIXEL CHUNK STACKER
-   Brushstroke shapes, wandering line creatures, fast stamping.
+   ABSTRACT ART — PIXEL CHUNK ANIMATOR
+   Chunks, snake-game wanderers, paint.net strokes, landscape
+   generation, musical rhythm mode. Whimsical & fun.
 ═══════════════════════════════════════════════════════════════ */
 
 const canvas      = document.getElementById('main-canvas');
@@ -21,7 +22,7 @@ const recordStatus = document.getElementById('record-status');
 const recordTime  = document.getElementById('record-time');
 const toast       = document.getElementById('toast');
 
-const sliders = {
+const sl = {
   speed:         document.getElementById('speed-slider'),
   minSize:       document.getElementById('min-size-slider'),
   maxSize:       document.getElementById('max-size-slider'),
@@ -31,8 +32,19 @@ const sliders = {
   drift:         document.getElementById('drift-slider'),
   whiteBias:     document.getElementById('white-bias-slider'),
   shapeStyle:    document.getElementById('shape-style-slider'),
-  wanderers:     document.getElementById('wanderer-slider'),
-  wandererWidth: document.getElementById('wanderer-width-slider'),
+  snakes:        document.getElementById('wanderer-slider'),
+  snakeWidth:    document.getElementById('wanderer-width-slider'),
+  paint:         document.getElementById('paint-slider'),
+  paintSize:     document.getElementById('paint-size-slider'),
+  rhythm:        document.getElementById('rhythm-slider'),
+};
+
+const tog = {
+  chunks:    document.getElementById('tog-chunks'),
+  snakes:    document.getElementById('tog-snakes'),
+  paint:     document.getElementById('tog-paint'),
+  landscape: document.getElementById('tog-landscape'),
+  rhythm:    document.getElementById('tog-rhythm'),
 };
 
 /* ── STATE ─────────────────────────────────────────────────────── */
@@ -44,40 +56,47 @@ let paused = false;
 let animFrame = null;
 let lastTime = 0;
 let stampAccum = 0;
+let globalTime = 0; // total elapsed ms for rhythm
 
-// Wanderers — autonomous line creatures
-let wanderers = [];
+let snakes = [];
+let paintStrokes = [];
 
 let mediaRecorder = null;
 let recordedChunks = [];
 let recordStartTime = 0;
 let recordTimerInterval = null;
 
-const CANVAS_W = 4800;
-const CANVAS_H = 2700;
-const speed1MsPerStamp = 3000;
+const W = 4800;
+const H = 2700;
+const SLOW_MS = 3000;
 
-// Pre-generated shape pools
-let shapePoolStripes = [];
-let shapePoolClumps = [];
-let shapePoolWeird = [];
-let shapePoolBrush = [];
-const POOL_SIZE = 200;
+// Shape pools
+let poolStripes = [], poolClumps = [], poolWeird = [], poolBrush = [];
+const POOL = 200;
 
 /* ── PARAMS ────────────────────────────────────────────────────── */
-function getParams() {
+function P() {
   return {
-    speed:         parseInt(sliders.speed.value),
-    minSize:       parseInt(sliders.minSize.value),
-    maxSize:       parseInt(sliders.maxSize.value),
-    density:       parseInt(sliders.density.value),
-    maxEdges:      parseInt(sliders.edges.value),
-    restore:       parseInt(sliders.restore.value) / 100,
-    drift:         parseInt(sliders.drift.value) / 100,
-    whiteBias:     parseInt(sliders.whiteBias.value) / 100,
-    shapeStyle:    parseInt(sliders.shapeStyle.value) / 100,
-    wandererCount: parseInt(sliders.wanderers.value),
-    wandererWidth: parseInt(sliders.wandererWidth.value),
+    speed:      +sl.speed.value,
+    minSize:    +sl.minSize.value,
+    maxSize:    +sl.maxSize.value,
+    density:    +sl.density.value,
+    maxEdges:   +sl.edges.value,
+    restore:    +sl.restore.value / 100,
+    drift:      +sl.drift.value / 100,
+    whiteBias:  +sl.whiteBias.value / 100,
+    shapeStyle: +sl.shapeStyle.value / 100,
+    snakeCount: +sl.snakes.value,
+    snakeWidth: +sl.snakeWidth.value,
+    paintCount: +sl.paint.value,
+    paintSize:  +sl.paintSize.value,
+    bpm:        +sl.rhythm.value,
+    // toggles
+    doChunks:    tog.chunks.checked,
+    doSnakes:    tog.snakes.checked,
+    doPaint:     tog.paint.checked,
+    doLandscape: tog.landscape.checked,
+    doRhythm:    tog.rhythm.checked,
   };
 }
 
@@ -88,374 +107,379 @@ function loadImage(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     const img = new Image();
-    img.onload = () => {
-      sourceImage = img;
-      initSourceCanvas();
-      buildShapePools();
-      dropOverlay.classList.remove('visible');
-      startAnimation();
-      showToast('Artwork loaded');
-    };
+    img.onload = () => { bootImage(img); };
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
 
-function initSourceCanvas() {
-  canvas.width = CANVAS_W;
-  canvas.height = CANVAS_H;
+function bootImage(img) {
+  sourceImage = img;
+  initSourceCanvas();
+  buildShapePools();
+  dropOverlay.classList.remove('visible');
+  startAnimation();
+}
 
+function initSourceCanvas() {
+  canvas.width = W;
+  canvas.height = H;
   sourceCanvas = document.createElement('canvas');
-  sourceCanvas.width = CANVAS_W;
-  sourceCanvas.height = CANVAS_H;
+  sourceCanvas.width = W;
+  sourceCanvas.height = H;
   sourceCtx = sourceCanvas.getContext('2d');
 
-  const imgAspect = sourceImage.width / sourceImage.height;
-  const canAspect = CANVAS_W / CANVAS_H;
+  const ia = sourceImage.width / sourceImage.height;
+  const ca = W / H;
   let sw, sh, sx, sy;
-  if (imgAspect > canAspect) {
-    sh = sourceImage.height;
-    sw = sh * canAspect;
-    sx = (sourceImage.width - sw) / 2;
-    sy = 0;
-  } else {
-    sw = sourceImage.width;
-    sh = sw / canAspect;
-    sx = 0;
-    sy = (sourceImage.height - sh) / 2;
-  }
-  sourceCtx.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, CANVAS_W, CANVAS_H);
-  sourceData = sourceCtx.getImageData(0, 0, CANVAS_W, CANVAS_H);
+  if (ia > ca) { sh = sourceImage.height; sw = sh * ca; sx = (sourceImage.width - sw) / 2; sy = 0; }
+  else { sw = sourceImage.width; sh = sw / ca; sx = 0; sy = (sourceImage.height - sh) / 2; }
+  sourceCtx.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, W, H);
+  sourceData = sourceCtx.getImageData(0, 0, W, H);
   ctx.drawImage(sourceCanvas, 0, 0);
 }
 
 /* ═══════════════════════════════════════════════════════════════
    SHAPE POOLS
-   Brushstrokes: flowing curves made of cells with varying width.
-   Stripes: strongly directional lines.
-   Clumps: compact fat blobs.
-   Weird: chaotic mixed forms.
 ═══════════════════════════════════════════════════════════════ */
-
-function growPolyomino(numCells, mode) {
-  const cells = [[0, 0]];
-  const cellSet = new Set();
-  cellSet.add('0,0');
+function grow(n, mode) {
+  const cells = [[0,0]];
+  const set = new Set(['0,0']);
   const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+  let pref = Math.random() < 0.5 ? 0 : 1;
+  let hR = 0, hC = 0, ang = Math.random() * Math.PI * 2;
 
-  let prefDir = Math.random() < 0.5 ? 0 : 1;
-  // For brushstroke: track a "head" position and grow from it
-  let headR = 0, headC = 0;
-  let angle = Math.random() * Math.PI * 2;
-
-  for (let i = 1; i < numCells; i++) {
+  for (let i = 1; i < n; i++) {
     if (mode === 'brush') {
-      // Brushstroke: advance head along a curving path, add width
-      angle += (Math.random() - 0.5) * 0.6;
-      const nr = headR + Math.round(Math.sin(angle));
-      const nc = headC + Math.round(Math.cos(angle));
-      const key = nr + ',' + nc;
-      if (!cellSet.has(key)) {
-        cells.push([nr, nc]);
-        cellSet.add(key);
-        headR = nr;
-        headC = nc;
-      }
-      // Add width: fill neighbors perpendicular to direction
-      const perpR = Math.round(Math.cos(angle));
-      const perpC = Math.round(-Math.sin(angle));
-      const width = 1 + Math.floor(Math.random() * 3);
-      for (let w = -width; w <= width; w++) {
-        const wr = headR + perpR * w;
-        const wc = headC + perpC * w;
-        const wk = wr + ',' + wc;
-        if (!cellSet.has(wk) && i + Math.abs(w) < numCells) {
-          cells.push([wr, wc]);
-          cellSet.add(wk);
-          i++;
-        }
+      ang += (Math.random() - 0.5) * 0.6;
+      const nr = hR + Math.round(Math.sin(ang));
+      const nc = hC + Math.round(Math.cos(ang));
+      if (!set.has(nr+','+nc)) { cells.push([nr,nc]); set.add(nr+','+nc); hR=nr; hC=nc; }
+      const pr = Math.round(Math.cos(ang)), pc = Math.round(-Math.sin(ang));
+      const w = 1 + Math.floor(Math.random()*3);
+      for (let j=-w;j<=w;j++) {
+        const wr=hR+pr*j, wc=hC+pc*j, wk=wr+','+wc;
+        if (!set.has(wk) && i<n) { cells.push([wr,wc]); set.add(wk); i++; }
       }
       continue;
     }
-
-    // Collect frontier for other modes
-    const frontier = [];
-    for (const [r, c] of cells) {
-      for (let d = 0; d < 4; d++) {
-        const nr = r + dirs[d][0];
-        const nc = c + dirs[d][1];
-        if (!cellSet.has(nr + ',' + nc)) {
-          frontier.push([nr, nc, d]);
-        }
-      }
+    const fr = [];
+    for (const [r,c] of cells) for (let d=0;d<4;d++) {
+      const nr=r+dirs[d][0], nc=c+dirs[d][1];
+      if (!set.has(nr+','+nc)) fr.push([nr,nc,d]);
     }
-    if (frontier.length === 0) break;
-
+    if (!fr.length) break;
     let pick;
-    if (mode === 'stripe') {
-      const preferred = frontier.filter(f =>
-        prefDir === 0 ? (f[2] < 2) : (f[2] >= 2)
-      );
-      pick = (preferred.length > 0 && Math.random() < 0.88)
-        ? preferred[Math.floor(Math.random() * preferred.length)]
-        : frontier[Math.floor(Math.random() * frontier.length)];
-    } else if (mode === 'clump') {
-      const scored = frontier.map(f => {
-        let n = 0;
-        for (const d of dirs) {
-          if (cellSet.has((f[0]+d[0]) + ',' + (f[1]+d[1]))) n++;
-        }
-        return { f, n };
-      });
-      scored.sort((a, b) => b.n - a.n);
-      const top = scored.slice(0, Math.max(1, Math.ceil(scored.length * 0.4)));
-      pick = top[Math.floor(Math.random() * top.length)].f;
+    if (mode==='stripe') {
+      const pf = fr.filter(f => pref===0 ? f[2]<2 : f[2]>=2);
+      pick = (pf.length && Math.random()<0.88) ? pf[Math.floor(Math.random()*pf.length)] : fr[Math.floor(Math.random()*fr.length)];
+    } else if (mode==='clump') {
+      const sc = fr.map(f => { let n=0; for (const d of dirs) if (set.has((f[0]+d[0])+','+(f[1]+d[1]))) n++; return {f,n}; });
+      sc.sort((a,b)=>b.n-a.n);
+      pick = sc[Math.floor(Math.random()*Math.max(1,Math.ceil(sc.length*0.4)))].f;
     } else {
-      pick = frontier[Math.floor(Math.random() * frontier.length)];
-      if (Math.random() < 0.2) prefDir = 1 - prefDir;
+      pick = fr[Math.floor(Math.random()*fr.length)];
+      if (Math.random()<0.2) pref = 1-pref;
     }
-
-    cells.push([pick[0], pick[1]]);
-    cellSet.add(pick[0] + ',' + pick[1]);
+    cells.push([pick[0],pick[1]]); set.add(pick[0]+','+pick[1]);
   }
-
-  const minR = Math.min(...cells.map(c => c[0]));
-  const minC = Math.min(...cells.map(c => c[1]));
-  return cells.map(([r, c]) => [r - minR, c - minC]);
+  const mr = Math.min(...cells.map(c=>c[0])), mc = Math.min(...cells.map(c=>c[1]));
+  return cells.map(([r,c])=>[r-mr,c-mc]);
 }
 
 function buildShapePools() {
-  shapePoolStripes = [];
-  shapePoolClumps = [];
-  shapePoolWeird = [];
-  shapePoolBrush = [];
-
-  for (let i = 0; i < POOL_SIZE; i++) {
-    const n = 8 + Math.floor(Math.random() * 50); // bigger shapes: 8-57 cells
-    shapePoolStripes.push(growPolyomino(n, 'stripe'));
-    shapePoolClumps.push(growPolyomino(n, 'clump'));
-    shapePoolWeird.push(growPolyomino(n, 'weird'));
-    shapePoolBrush.push(growPolyomino(n, 'brush'));
+  poolStripes=[]; poolClumps=[]; poolWeird=[]; poolBrush=[];
+  for (let i=0;i<POOL;i++) {
+    const n = 8 + Math.floor(Math.random()*50);
+    poolStripes.push(grow(n,'stripe'));
+    poolClumps.push(grow(n,'clump'));
+    poolWeird.push(grow(n,'weird'));
+    poolBrush.push(grow(n,'brush'));
   }
 }
 
-function pickShape(shapeStyle) {
-  const idx = Math.floor(Math.random() * POOL_SIZE);
-  // Mix brushstrokes in everywhere (~30% chance)
-  if (Math.random() < 0.3) return shapePoolBrush[idx];
-  if (shapeStyle < 0.33) return shapePoolStripes[idx];
-  if (shapeStyle > 0.66) return shapePoolClumps[idx];
-  return shapePoolWeird[idx];
+function pickShape(style) {
+  const i = Math.floor(Math.random()*POOL);
+  if (Math.random()<0.3) return poolBrush[i];
+  if (style<0.33) return poolStripes[i];
+  if (style>0.66) return poolClumps[i];
+  return poolWeird[i];
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   WANDERERS — autonomous line creatures that travel the canvas,
-   sampling from the original art and stamping as they go.
-   Each one has a position, direction, width, and lifetime.
-   They curve, fork, and create their own pocket compositions.
+   WHITE BIAS
 ═══════════════════════════════════════════════════════════════ */
+function pickSrc(w, h, wb) {
+  const mx = Math.max(1,W-w), my = Math.max(1,H-h);
+  if (wb < 0.05) return [Math.floor(Math.random()*mx), Math.floor(Math.random()*my)];
+  const d = sourceData.data;
+  let bx=0,by=0,bs=-1;
+  const tries = 3+Math.floor(wb*15);
+  for (let i=0;i<tries;i++) {
+    const cx=Math.floor(Math.random()*mx), cy=Math.floor(Math.random()*my);
+    let t=0; for (let j=0;j<8;j++) {
+      const px=Math.min(W-1,cx+Math.floor(Math.random()*w));
+      const py=Math.min(H-1,cy+Math.floor(Math.random()*h));
+      const idx=(py*W+px)*4; t+=(d[idx]+d[idx+1]+d[idx+2])/765;
+    }
+    const score = (1-wb)*Math.random() + wb*(t/8);
+    if (score>bs) { bs=score; bx=cx; by=cy; }
+  }
+  return [bx,by];
+}
 
-function spawnWanderer(wandererWidth) {
-  const w = Math.max(4, wandererWidth * (0.5 + Math.random()));
+/* ═══════════════════════════════════════════════════════════════
+   CHUNK STAMPING
+═══════════════════════════════════════════════════════════════ */
+function stampChunk(p) {
+  const cells = pickShape(p.shapeStyle);
+  const size = p.minSize + Math.random()*(p.maxSize-p.minSize);
+  const cpx = Math.max(2, Math.floor(size / Math.max(1, Math.sqrt(cells.length))));
+  let mR=0, mC=0;
+  for (const [r,c] of cells) { if (r>mR)mR=r; if(c>mC)mC=c; }
+  const sw = (mC+1)*cpx, sh = (mR+1)*cpx;
+  if (sw<2||sh<2) return;
+
+  const [sx,sy] = pickSrc(sw,sh,p.whiteBias);
+  let dx = Math.floor(Math.random()*W) - Math.floor(sw/2);
+  let dy = Math.floor(Math.random()*H) - Math.floor(sh/2);
+  if (p.drift>0.01) { dx=Math.round(dx*(1-p.drift)+sx*p.drift); dy=Math.round(dy*(1-p.drift)+sy*p.drift); }
+
+  for (const [r,c] of cells) {
+    const ddx=dx+c*cpx, ddy=dy+r*cpx, ssx=sx+c*cpx, ssy=sy+r*cpx;
+    if (ddx<-cpx||ddx>W||ddy<-cpx||ddy>H) continue;
+    if (ssx<0||ssx+cpx>W||ssy<0||ssy+cpx>H) continue;
+    ctx.drawImage(sourceCanvas, ssx,ssy,cpx,cpx, ddx,ddy,cpx,cpx);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SNAKES — Nokia snake-game style: 90° turns only, pixel grid,
+   geometric squared-off trails. No curves.
+═══════════════════════════════════════════════════════════════ */
+const SNAKE_DIRS = [[0,1],[1,0],[0,-1],[-1,0]]; // right, down, left, up
+
+function spawnSnake(p) {
+  const cellPx = Math.max(4, Math.floor(p.snakeWidth * (0.5+Math.random())));
+  const dir = Math.floor(Math.random()*4);
+  const x = Math.floor(Math.random() * (W/cellPx)) * cellPx;
+  const y = Math.floor(Math.random() * (H/cellPx)) * cellPx;
   return {
-    // Current position on canvas (destination)
-    x: Math.random() * CANVAS_W,
-    y: Math.random() * CANVAS_H,
-    // Source offset: where this wanderer samples from (different spot)
-    srcOffX: (Math.random() - 0.5) * CANVAS_W * 0.8,
-    srcOffY: (Math.random() - 0.5) * CANVAS_H * 0.8,
-    // Movement
-    angle: Math.random() * Math.PI * 2,
-    speed: 2 + Math.random() * 8,
-    turnRate: (Math.random() - 0.5) * 0.08,
-    turnDrift: (Math.random() - 0.5) * 0.002,
-    // Appearance
-    width: w,
-    widthVar: 0.3 + Math.random() * 0.7, // how much width varies
-    // Life
+    x, y,
+    dir,
+    cellPx,
+    // Source offset — samples from a different area
+    srcOffX: Math.floor((Math.random()-0.5) * W * 0.7),
+    srcOffY: Math.floor((Math.random()-0.5) * H * 0.7),
     age: 0,
-    lifetime: 200 + Math.floor(Math.random() * 800), // steps
-    // Personality
-    curviness: 0.02 + Math.random() * 0.12,
-    wobble: Math.random() * Math.PI * 2,
+    lifetime: 100 + Math.floor(Math.random()*500),
+    turnTimer: 5 + Math.floor(Math.random()*15), // steps between turns
+    turnCount: 0,
+    // Body width in cells (1-4)
+    bodyW: 1 + Math.floor(Math.random()*3),
   };
 }
 
-function stepWanderer(w) {
-  w.age++;
+function stepSnake(s) {
+  s.age++;
+  s.turnCount++;
 
-  // Organic turning: smooth curves with occasional shifts
-  w.turnRate += w.turnDrift + (Math.random() - 0.5) * w.curviness;
-  w.turnRate = Math.max(-0.15, Math.min(0.15, w.turnRate));
-  w.angle += w.turnRate;
-
-  // Move
-  w.x += Math.cos(w.angle) * w.speed;
-  w.y += Math.sin(w.angle) * w.speed;
-
-  // Wrap around canvas edges
-  if (w.x < -50) w.x += CANVAS_W + 100;
-  if (w.x > CANVAS_W + 50) w.x -= CANVAS_W + 100;
-  if (w.y < -50) w.y += CANVAS_H + 100;
-  if (w.y > CANVAS_H + 50) w.y -= CANVAS_H + 100;
-
-  // Wobbling width
-  w.wobble += 0.1;
-  const currentW = w.width * (1 + Math.sin(w.wobble) * w.widthVar * 0.5);
-  const halfW = Math.max(2, Math.floor(currentW / 2));
-
-  // Source position: offset from destination
-  let srcX = Math.floor(w.x + w.srcOffX);
-  let srcY = Math.floor(w.y + w.srcOffY);
-  // Wrap source into canvas bounds
-  srcX = ((srcX % CANVAS_W) + CANVAS_W) % CANVAS_W;
-  srcY = ((srcY % CANVAS_H) + CANVAS_H) % CANVAS_H;
-
-  const destX = Math.floor(w.x);
-  const destY = Math.floor(w.y);
-
-  // Stamp a block of pixels perpendicular to movement direction
-  const perpX = -Math.sin(w.angle);
-  const perpY = Math.cos(w.angle);
-
-  // Draw several cells along the width
-  const cellSize = Math.max(2, Math.floor(currentW / 4));
-  const steps = Math.max(1, Math.floor(currentW / cellSize));
-
-  for (let i = -steps; i <= steps; i++) {
-    const dx = Math.floor(destX + perpX * i * cellSize);
-    const dy = Math.floor(destY + perpY * i * cellSize);
-    const sx = Math.floor(srcX + perpX * i * cellSize);
-    const sy = Math.floor(srcY + perpY * i * cellSize);
-
-    if (dx < 0 || dx + cellSize > CANVAS_W || dy < 0 || dy + cellSize > CANVAS_H) continue;
-    const clampSx = ((sx % CANVAS_W) + CANVAS_W) % CANVAS_W;
-    const clampSy = ((sy % CANVAS_H) + CANVAS_H) % CANVAS_H;
-    if (clampSx + cellSize > CANVAS_W || clampSy + cellSize > CANVAS_H) continue;
-
-    ctx.drawImage(
-      sourceCanvas,
-      clampSx, clampSy, cellSize, cellSize,
-      dx, dy, cellSize, cellSize
-    );
+  // Turn decision: snake-game style 90° turns
+  if (s.turnCount >= s.turnTimer) {
+    s.turnCount = 0;
+    s.turnTimer = 3 + Math.floor(Math.random()*12);
+    // Turn left or right (90°)
+    if (Math.random() < 0.5) {
+      s.dir = (s.dir + 1) % 4;
+    } else {
+      s.dir = (s.dir + 3) % 4;
+    }
   }
 
-  return w.age < w.lifetime;
+  // Move one cell in current direction
+  const d = SNAKE_DIRS[s.dir];
+  s.x += d[1] * s.cellPx;
+  s.y += d[0] * s.cellPx;
+
+  // Wrap
+  if (s.x < 0) s.x += W;
+  if (s.x >= W) s.x -= W;
+  if (s.y < 0) s.y += H;
+  if (s.y >= H) s.y -= H;
+
+  // Stamp body — a square block of cells
+  const perpDir = (s.dir + 1) % 4;
+  const pd = SNAKE_DIRS[perpDir];
+
+  for (let w = -Math.floor(s.bodyW/2); w <= Math.floor(s.bodyW/2); w++) {
+    const dx = s.x + pd[1] * w * s.cellPx;
+    const dy = s.y + pd[0] * w * s.cellPx;
+    let sx = ((dx + s.srcOffX) % W + W) % W;
+    let sy = ((dy + s.srcOffY) % H + H) % H;
+
+    if (dx<0||dx+s.cellPx>W||dy<0||dy+s.cellPx>H) continue;
+    if (sx+s.cellPx>W) sx = W-s.cellPx;
+    if (sy+s.cellPx>H) sy = H-s.cellPx;
+
+    ctx.drawImage(sourceCanvas, sx,sy,s.cellPx,s.cellPx, dx,dy,s.cellPx,s.cellPx);
+  }
+
+  return s.age < s.lifetime;
 }
 
-function updateWanderers(p) {
-  const target = p.wandererCount;
-
-  // Spawn new wanderers as needed
-  while (wanderers.length < target) {
-    wanderers.push(spawnWanderer(p.wandererWidth));
-  }
-
-  // Remove excess
-  while (wanderers.length > target) {
-    wanderers.pop();
-  }
-
-  // Step each wanderer, replace dead ones
-  for (let i = 0; i < wanderers.length; i++) {
-    const alive = stepWanderer(wanderers[i]);
-    if (!alive) {
-      wanderers[i] = spawnWanderer(p.wandererWidth);
-    }
+function updateSnakes(p) {
+  while (snakes.length < p.snakeCount) snakes.push(spawnSnake(p));
+  while (snakes.length > p.snakeCount) snakes.pop();
+  for (let i=0; i<snakes.length; i++) {
+    if (!stepSnake(snakes[i])) snakes[i] = spawnSnake(p);
   }
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   WHITE BIAS SAMPLING
+   PAINT.NET STROKES — long sweeping strokes that drag pixels
+   like a smear/smudge tool, pulling color across the canvas
 ═══════════════════════════════════════════════════════════════ */
-
-function sampleBrightness(x, y, w, h) {
-  const d = sourceData.data;
-  let total = 0;
-  for (let i = 0; i < 8; i++) {
-    const px = Math.min(CANVAS_W - 1, Math.floor(x + Math.random() * w));
-    const py = Math.min(CANVAS_H - 1, Math.floor(y + Math.random() * h));
-    const idx = (py * CANVAS_W + px) * 4;
-    total += (d[idx] + d[idx+1] + d[idx+2]) / 765;
-  }
-  return total / 8;
+function spawnPaintStroke(p) {
+  const sz = p.paintSize * (0.5 + Math.random());
+  return {
+    x: Math.random() * W,
+    y: Math.random() * H,
+    angle: Math.random() * Math.PI * 2,
+    speed: 3 + Math.random() * 10,
+    size: sz,
+    srcX: Math.floor(Math.random() * W),
+    srcY: Math.floor(Math.random() * H),
+    age: 0,
+    lifetime: 50 + Math.floor(Math.random() * 200),
+    wobble: Math.random() * Math.PI * 2,
+    curve: (Math.random() - 0.5) * 0.06,
+  };
 }
 
-function pickSourceXY(w, h, whiteBias) {
-  const maxX = Math.max(1, CANVAS_W - w);
-  const maxY = Math.max(1, CANVAS_H - h);
+function stepPaintStroke(s) {
+  s.age++;
+  s.angle += s.curve;
+  s.wobble += 0.15;
+  s.x += Math.cos(s.angle) * s.speed;
+  s.y += Math.sin(s.angle) * s.speed;
 
-  if (whiteBias < 0.05) {
-    return [Math.floor(Math.random() * maxX), Math.floor(Math.random() * maxY)];
+  // Wrap
+  if (s.x<0) s.x+=W; if (s.x>=W) s.x-=W;
+  if (s.y<0) s.y+=H; if (s.y>=H) s.y-=H;
+
+  const w = Math.floor(s.size * (0.7 + Math.sin(s.wobble) * 0.3));
+  const h = Math.max(4, Math.floor(w * 0.3));
+  const dx = Math.floor(s.x - w/2);
+  const dy = Math.floor(s.y - h/2);
+
+  // Source tracks along the original image at a different position
+  let sx = Math.floor((s.srcX + s.age * Math.cos(s.angle) * 2) % W);
+  let sy = Math.floor((s.srcY + s.age * Math.sin(s.angle) * 2) % H);
+  if (sx<0) sx+=W; if (sy<0) sy+=H;
+
+  // Paint a rectangular smear
+  const cw = Math.min(w, W-Math.max(0,dx), W-sx);
+  const ch = Math.min(h, H-Math.max(0,dy), H-sy);
+  if (cw>0 && ch>0 && dx>=0 && dy>=0 && dx+cw<=W && dy+ch<=H && sx+cw<=W && sy+ch<=H) {
+    ctx.drawImage(sourceCanvas, sx,sy,cw,ch, dx,dy,cw,ch);
   }
 
-  let bestX = 0, bestY = 0, bestScore = -1;
-  const tries = 3 + Math.floor(whiteBias * 15);
-  for (let i = 0; i < tries; i++) {
-    const cx = Math.floor(Math.random() * maxX);
-    const cy = Math.floor(Math.random() * maxY);
-    const brightness = sampleBrightness(cx, cy, w, h);
-    const score = (1 - whiteBias) * Math.random() + whiteBias * brightness;
-    if (score > bestScore) {
-      bestScore = score;
-      bestX = cx;
-      bestY = cy;
-    }
+  return s.age < s.lifetime;
+}
+
+function updatePaint(p) {
+  while (paintStrokes.length < p.paintCount) paintStrokes.push(spawnPaintStroke(p));
+  while (paintStrokes.length > p.paintCount) paintStrokes.pop();
+  for (let i=0; i<paintStrokes.length; i++) {
+    if (!stepPaintStroke(paintStrokes[i])) paintStrokes[i] = spawnPaintStroke(p);
   }
-  return [bestX, bestY];
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   STAMP CHUNK
+   LANDSCAPE MODE — stamps chunks biased towards forming
+   mountain ridgelines, cloud layers, and creature silhouettes
+   at specific horizon zones on the canvas.
 ═══════════════════════════════════════════════════════════════ */
-
-function stampChunk() {
-  const p = getParams();
+function stampLandscape(p) {
   const cells = pickShape(p.shapeStyle);
+  const size = p.minSize + Math.random()*(p.maxSize-p.minSize);
+  const cpx = Math.max(2, Math.floor(size / Math.max(1, Math.sqrt(cells.length))));
+  let mR=0, mC=0;
+  for (const [r,c] of cells) { if(r>mR)mR=r; if(c>mC)mC=c; }
+  const sw = (mC+1)*cpx, sh = (mR+1)*cpx;
+  if (sw<2||sh<2) return;
 
-  const size = p.minSize + Math.random() * (p.maxSize - p.minSize);
-  const cellPx = Math.max(2, Math.floor(size / Math.max(1, Math.sqrt(cells.length))));
+  const [sx,sy] = pickSrc(sw,sh,p.whiteBias);
 
-  let maxR = 0, maxC = 0;
-  for (const [r, c] of cells) {
-    if (r > maxR) maxR = r;
-    if (c > maxC) maxC = c;
+  // Choose a zone: sky (top 30%), mountains (30-60%), ground (60-85%), creatures (random)
+  const zone = Math.random();
+  let dy;
+  if (zone < 0.25) {
+    // Sky/clouds — top area, wide shapes
+    dy = Math.floor(Math.random() * H * 0.3);
+  } else if (zone < 0.55) {
+    // Mountain ridgeline — middle band, follow a ridge curve
+    const ridge = H * 0.35 + Math.sin(globalTime * 0.0003 + Math.random() * 6) * H * 0.1;
+    dy = Math.floor(ridge + (Math.random()-0.5) * H * 0.15);
+  } else if (zone < 0.8) {
+    // Ground/terrain
+    dy = Math.floor(H * 0.55 + Math.random() * H * 0.35);
+  } else {
+    // Creatures/animals — small shapes scattered
+    dy = Math.floor(H * 0.4 + Math.random() * H * 0.4);
   }
-  const shapeW = (maxC + 1) * cellPx;
-  const shapeH = (maxR + 1) * cellPx;
-  if (shapeW < 2 || shapeH < 2) return;
+  const dx = Math.floor(Math.random() * W) - Math.floor(sw/2);
 
-  const [srcX, srcY] = pickSourceXY(shapeW, shapeH, p.whiteBias);
+  for (const [r,c] of cells) {
+    const ddx=dx+c*cpx, ddy=dy+r*cpx, ssx=sx+c*cpx, ssy=sy+r*cpx;
+    if (ddx<-cpx||ddx>W||ddy<-cpx||ddy>H) continue;
+    if (ssx<0||ssx+cpx>W||ssy<0||ssy+cpx>H) continue;
+    ctx.drawImage(sourceCanvas, ssx,ssy,cpx,cpx, ddx,ddy,cpx,cpx);
+  }
+}
 
-  let destX = Math.floor(Math.random() * CANVAS_W) - Math.floor(shapeW / 2);
-  let destY = Math.floor(Math.random() * CANVAS_H) - Math.floor(shapeH / 2);
+/* ═══════════════════════════════════════════════════════════════
+   RHYTHM MODE — pulses activity to a BPM, creating musical
+   bursts and pauses. Whimsical bouncy feel.
+═══════════════════════════════════════════════════════════════ */
+function rhythmMultiplier(bpm, time) {
+  const beatMs = 60000 / bpm;
+  const phase = (time % beatMs) / beatMs; // 0-1 within beat
 
-  if (p.drift > 0.01) {
-    destX = Math.round(destX * (1 - p.drift) + srcX * p.drift);
-    destY = Math.round(destY * (1 - p.drift) + srcY * p.drift);
+  // Kick on the beat (phase 0): big burst
+  // Snare on half beat: medium burst
+  // Rest: quiet
+  // Creates a bouncy 4/4 feel
+
+  const beat = Math.floor(time / beatMs) % 4;
+  let mult = 0.1; // base quiet level
+
+  if (phase < 0.15) {
+    // On the beat — burst!
+    if (beat === 0) mult = 4.0;        // big downbeat
+    else if (beat === 2) mult = 2.5;    // snare
+    else mult = 1.5;                    // ghost notes
+  } else if (phase < 0.3) {
+    mult = 0.8; // decay
+  } else if (phase > 0.45 && phase < 0.55) {
+    // Off-beat swing — little playful hits
+    mult = 1.2;
   }
 
-  for (const [r, c] of cells) {
-    const dx = destX + c * cellPx;
-    const dy = destY + r * cellPx;
-    const sx = srcX + c * cellPx;
-    const sy = srcY + r * cellPx;
-
-    if (dx < -cellPx || dx > CANVAS_W || dy < -cellPx || dy > CANVAS_H) continue;
-    if (sx < 0 || sx + cellPx > CANVAS_W || sy < 0 || sy + cellPx > CANVAS_H) continue;
-
-    ctx.drawImage(sourceCanvas, sx, sy, cellPx, cellPx, dx, dy, cellPx, cellPx);
-  }
+  // Add some swing — every other beat is slightly late
+  // Makes it feel more musical and less mechanical
+  return mult;
 }
 
 /* ═══════════════════════════════════════════════════════════════
    ANIMATION LOOP
 ═══════════════════════════════════════════════════════════════ */
-
 function startAnimation() {
   if (animFrame) cancelAnimationFrame(animFrame);
   stampAccum = 0;
-  wanderers = [];
+  globalTime = 0;
+  snakes = [];
+  paintStrokes = [];
   lastTime = performance.now();
   paused = false;
   btnPause.textContent = 'Pause';
@@ -469,8 +493,9 @@ function tick(now) {
   if (!now) now = performance.now();
   const dt = Math.min(now - lastTime, 50);
   lastTime = now;
+  globalTime += dt;
 
-  const p = getParams();
+  const p = P();
 
   // Restore
   if (p.restore > 0) {
@@ -480,62 +505,65 @@ function tick(now) {
     ctx.restore();
   }
 
-  // Chunk stamps
-  stampAccum += dt;
-  const msPerStamp = speed1MsPerStamp / Math.pow(p.speed / 100, 2.5);
-  let stampsThisFrame = 0;
-  if (p.speed <= 5) {
-    while (stampAccum >= msPerStamp) {
-      stampAccum -= msPerStamp;
-      stampsThisFrame++;
+  // Rhythm multiplier
+  const rmult = p.doRhythm ? rhythmMultiplier(p.bpm, globalTime) : 1;
+
+  // ── CHUNKS ──
+  if (p.doChunks) {
+    stampAccum += dt;
+    const msPerStamp = SLOW_MS / Math.pow(p.speed/100, 2.5);
+    let stamps = 0;
+    if (p.speed <= 5) {
+      while (stampAccum >= msPerStamp) { stampAccum -= msPerStamp; stamps++; }
+      stamps = Math.max(0, stamps * Math.max(1, Math.floor(p.density/10)));
+    } else {
+      stampAccum = 0;
+      stamps = Math.max(1, Math.floor(Math.pow(p.speed/100,2.5)*60*(p.density/10)));
     }
-    stampsThisFrame = Math.max(0, stampsThisFrame * Math.max(1, Math.floor(p.density / 10)));
-  } else {
-    stampAccum = 0;
-    stampsThisFrame = Math.max(1,
-      Math.floor(Math.pow(p.speed / 100, 2.5) * 60 * (p.density / 10))
-    );
+    stamps = Math.floor(stamps * rmult);
+    for (let i=0; i<stamps; i++) stampChunk(p);
   }
 
-  for (let i = 0; i < stampsThisFrame; i++) {
-    stampChunk();
+  // ── LANDSCAPE ──
+  if (p.doLandscape) {
+    const lStamps = Math.max(1, Math.floor(3 * rmult * (p.density / 10)));
+    for (let i=0; i<lStamps; i++) stampLandscape(p);
   }
 
-  // Wanderers: step multiple times per frame for visible movement
-  const wandererSteps = Math.max(1, Math.floor(p.speed / 15));
-  for (let s = 0; s < wandererSteps; s++) {
-    updateWanderers(p);
+  // ── SNAKES ──
+  if (p.doSnakes) {
+    const snakeSteps = Math.max(1, Math.floor((p.speed/15) * rmult));
+    for (let s=0; s<snakeSteps; s++) updateSnakes(p);
+  }
+
+  // ── PAINT STROKES ──
+  if (p.doPaint) {
+    const paintSteps = Math.max(1, Math.floor(2 * rmult));
+    for (let s=0; s<paintSteps; s++) updatePaint(p);
   }
 }
 
 /* ═══════════════════════════════════════════════════════════════
    RECORDING
 ═══════════════════════════════════════════════════════════════ */
-
 function startRecording() {
   const stream = canvas.captureStream(30);
-  const mimeTypes = [
-    'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4',
-  ];
-  let mimeType = '';
-  for (const mt of mimeTypes) {
-    if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
-  }
-  if (!mimeType) { showToast('Recording not supported'); return; }
+  const types = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm','video/mp4'];
+  let mime = '';
+  for (const t of types) if (MediaRecorder.isTypeSupported(t)) { mime=t; break; }
+  if (!mime) { showToast('Recording not supported'); return; }
 
   recordedChunks = [];
-  mediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
-  mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+  mediaRecorder = new MediaRecorder(stream, { mimeType:mime, videoBitsPerSecond:8000000 });
+  mediaRecorder.ondataavailable = e => { if (e.data.size>0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = () => {
-    const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
-    const blob = new Blob(recordedChunks, { type: mimeType });
+    const ext = mime.includes('mp4')?'mp4':'webm';
+    const blob = new Blob(recordedChunks, {type:mime});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `art-chunk-${Date.now()}.${ext}`;
-    a.click();
+    a.href=url; a.download=`art-${Date.now()}.${ext}`; a.click();
     URL.revokeObjectURL(url);
-    showToast(`Saved as .${ext}`);
+    showToast(`Saved .${ext}`);
   };
 
   mediaRecorder.start(100);
@@ -544,12 +572,10 @@ function startRecording() {
   btnStop.disabled = false;
   recordStatus.classList.remove('hidden');
   recordTimerInterval = setInterval(() => {
-    const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
-    recordTime.textContent =
-      String(Math.floor(elapsed / 60)).padStart(2, '0') + ':' +
-      String(elapsed % 60).padStart(2, '0');
+    const e = Math.floor((Date.now()-recordStartTime)/1000);
+    recordTime.textContent = String(Math.floor(e/60)).padStart(2,'0')+':'+String(e%60).padStart(2,'0');
   }, 500);
-  showToast('Recording — adjust sliders to program output');
+  showToast('Recording — tweak sliders to program output');
 }
 
 function stopRecording() {
@@ -564,13 +590,11 @@ function stopRecording() {
 /* ═══════════════════════════════════════════════════════════════
    EVENTS
 ═══════════════════════════════════════════════════════════════ */
-
-fileInput.addEventListener('change', (e) => { if (e.target.files[0]) loadImage(e.target.files[0]); });
-dropOverlay.addEventListener('dragover', (e) => { e.preventDefault(); dropOverlay.classList.add('dragover'); });
-dropOverlay.addEventListener('dragleave', () => { dropOverlay.classList.remove('dragover'); });
-dropOverlay.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropOverlay.classList.remove('dragover');
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadImage(e.target.files[0]); });
+dropOverlay.addEventListener('dragover', e => { e.preventDefault(); dropOverlay.classList.add('dragover'); });
+dropOverlay.addEventListener('dragleave', () => dropOverlay.classList.remove('dragover'));
+dropOverlay.addEventListener('drop', e => {
+  e.preventDefault(); dropOverlay.classList.remove('dragover');
   const f = e.dataTransfer.files[0];
   if (f && f.type.startsWith('image/')) loadImage(f);
 });
@@ -583,21 +607,18 @@ btnPause.addEventListener('click', () => {
   if (!paused) lastTime = performance.now();
 });
 btnReset.addEventListener('click', () => {
-  if (sourceCanvas) { ctx.clearRect(0, 0, CANVAS_W, CANVAS_H); ctx.drawImage(sourceCanvas, 0, 0); }
-  stampAccum = 0;
-  wanderers = [];
-  showToast('Reset to original');
+  if (sourceCanvas) { ctx.clearRect(0,0,W,H); ctx.drawImage(sourceCanvas,0,0); }
+  stampAccum=0; snakes=[]; paintStrokes=[];
+  showToast('Reset');
 });
 btnRecord.addEventListener('click', startRecording);
 btnStop.addEventListener('click', stopRecording);
 btnLoadNew.addEventListener('click', () => {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') stopRecording();
+  if (mediaRecorder && mediaRecorder.state!=='inactive') stopRecording();
   if (animFrame) cancelAnimationFrame(animFrame);
-  sourceImage = null;
-  sourceData = null;
-  wanderers = [];
+  sourceImage=null; sourceData=null; snakes=[]; paintStrokes=[];
   dropOverlay.classList.add('visible');
-  fileInput.value = '';
+  fileInput.value='';
 });
 
 function showToast(msg) {
@@ -606,21 +627,15 @@ function showToast(msg) {
   setTimeout(() => toast.classList.remove('visible'), 2500);
 }
 
-canvas.width = CANVAS_W;
-canvas.height = CANVAS_H;
+/* ═══════════════════════════════════════════════════════════════
+   INIT — auto-load artwork.jpg if available
+═══════════════════════════════════════════════════════════════ */
+canvas.width = W;
+canvas.height = H;
 
-// Auto-load default artwork if available
 (function autoLoad() {
   const img = new Image();
-  img.onload = () => {
-    sourceImage = img;
-    initSourceCanvas();
-    buildShapePools();
-    dropOverlay.classList.remove('visible');
-    startAnimation();
-  };
-  img.onerror = () => {
-    // No default artwork found — show the drop overlay
-  };
+  img.onload = () => bootImage(img);
+  img.onerror = () => {}; // show drop overlay
   img.src = 'artwork.jpg';
 })();
