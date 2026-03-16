@@ -3,81 +3,96 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Art Blocks — Paint with Falling Shapes</title>
+  <title>Abstract Art — Pixel Chunk Animator</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="app">
-    <header>
-      <h1>Art Blocks</h1>
-      <p class="subtitle">Drop shapes. Build art.</p>
-    </header>
+  <canvas id="main-canvas"></canvas>
 
-    <main>
-      <aside id="sidebar-left">
-        <section class="panel" id="color-panel">
-          <h2>Color</h2>
-          <div id="palette"></div>
-          <div id="custom-color-row">
-            <label for="custom-color">Custom</label>
-            <input type="color" id="custom-color" value="#ff6b6b" />
-          </div>
-          <div id="current-color-preview">
-            <span>Active</span>
-            <div id="active-swatch"></div>
-          </div>
-        </section>
-
-        <section class="panel" id="shape-panel">
-          <h2>Shape</h2>
-          <div id="shape-selector"></div>
-        </section>
-      </aside>
-
-      <div id="canvas-area">
-        <canvas id="game-canvas"></canvas>
-        <div id="ghost-label">Ghost preview</div>
-      </div>
-
-      <aside id="sidebar-right">
-        <section class="panel" id="controls-panel">
-          <h2>Controls</h2>
-          <button id="btn-drop" class="primary-btn">Drop Block</button>
-          <div class="key-hints">
-            <div class="key-row"><kbd>←</kbd><kbd>→</kbd> Move</div>
-            <div class="key-row"><kbd>↑</kbd> Rotate</div>
-            <div class="key-row"><kbd>↓</kbd> Fall faster</div>
-            <div class="key-row"><kbd>Space</kbd> Lock now</div>
-          </div>
-        </section>
-
-        <section class="panel" id="actions-panel">
-          <h2>Canvas</h2>
-          <button id="btn-undo" class="secondary-btn">Undo last</button>
-          <button id="btn-clear" class="danger-btn">Clear all</button>
-          <button id="btn-save" class="secondary-btn">Save image</button>
-        </section>
-
-        <section class="panel" id="speed-panel">
-          <h2>Fall speed</h2>
-          <input type="range" id="speed-slider" min="1" max="10" value="4" />
-          <div id="speed-labels">
-            <span>Slow</span><span>Fast</span>
-          </div>
-        </section>
-
-        <section class="panel" id="opacity-panel">
-          <h2>Opacity</h2>
-          <input type="range" id="opacity-slider" min="10" max="100" value="100" />
-          <div id="opacity-labels">
-            <span>10%</span><span>100%</span>
-          </div>
-        </section>
-      </aside>
-    </main>
-
-    <div id="toast" aria-live="polite"></div>
+  <div id="drop-overlay" class="visible">
+    <div id="drop-message">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="1.5">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <p>Drop your artwork here or click to load</p>
+      <span class="hint">Supports PNG, JPG, WebP</span>
+    </div>
+    <input type="file" id="file-input" accept="image/*" />
   </div>
+
+  <div id="menu" class="visible">
+    <div id="menu-header">
+      <span class="menu-title">Controls</span>
+      <button id="btn-hide-menu" title="Hide menu">✕</button>
+    </div>
+
+    <div class="menu-section">
+      <label>Chunk Speed</label>
+      <input type="range" id="speed-slider" min="1" max="100" value="30" />
+      <div class="range-labels"><span>Slow</span><span>Fast</span></div>
+    </div>
+
+    <div class="menu-section">
+      <label>Chunk Min Size</label>
+      <input type="range" id="min-size-slider" min="10" max="200" value="30" />
+      <div class="range-labels"><span>10px</span><span>200px</span></div>
+    </div>
+
+    <div class="menu-section">
+      <label>Chunk Max Size</label>
+      <input type="range" id="max-size-slider" min="30" max="500" value="150" />
+      <div class="range-labels"><span>30px</span><span>500px</span></div>
+    </div>
+
+    <div class="menu-section">
+      <label>Chunk Density</label>
+      <input type="range" id="density-slider" min="1" max="50" value="12" />
+      <div class="range-labels"><span>Sparse</span><span>Dense</span></div>
+    </div>
+
+    <div class="menu-section">
+      <label>Max Edges</label>
+      <input type="range" id="edges-slider" min="4" max="40" value="20" />
+      <div class="range-labels"><span>4</span><span>40</span></div>
+    </div>
+
+    <div class="menu-section">
+      <label>Restore Original</label>
+      <input type="range" id="restore-slider" min="0" max="100" value="0" />
+      <div class="range-labels"><span>Animated</span><span>Original</span></div>
+    </div>
+
+    <div class="menu-section">
+      <label>Hypnotic Drift</label>
+      <input type="range" id="drift-slider" min="0" max="100" value="40" />
+      <div class="range-labels"><span>None</span><span>Max</span></div>
+    </div>
+
+    <div class="menu-section menu-buttons">
+      <button id="btn-pause" class="ctrl-btn">Pause</button>
+      <button id="btn-reset" class="ctrl-btn">Reset</button>
+    </div>
+
+    <div class="menu-section menu-buttons">
+      <button id="btn-record" class="ctrl-btn record-btn">Record MP4</button>
+      <button id="btn-stop-record" class="ctrl-btn stop-btn" disabled>Stop Recording</button>
+    </div>
+
+    <div id="record-status" class="hidden">
+      <span id="record-indicator"></span>
+      <span id="record-time">00:00</span>
+    </div>
+
+    <div class="menu-section">
+      <button id="btn-load-new" class="ctrl-btn">Load New Image</button>
+    </div>
+  </div>
+
+  <button id="btn-show-menu" class="hidden" title="Show menu">☰</button>
+
+  <div id="toast" aria-live="polite"></div>
 
   <script src="game.js"></script>
 </body>
