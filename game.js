@@ -2,6 +2,7 @@
    Four-Way Tetris Art Engine
    Blocks fall from TOP, RIGHT, BOTTOM, LEFT in turn,
    clustering around a seed block in the centre.
+   Inspired by bold, flat illustration with bleeding radial gradients.
    ═══════════════════════════════════════════════════════════════════ */
 
 (() => {
@@ -10,9 +11,9 @@
   // ── Directions ──────────────────────────────────────────────────
   const DIR = { TOP: 0, RIGHT: 1, BOTTOM: 2, LEFT: 3 };
   const DIR_NAMES = ["TOP", "RIGHT", "BOTTOM", "LEFT"];
-  const DIR_COLORS = ["#ff6b6b", "#4ecdc4", "#ffe66d", "#a29bfe"];
+  const DIR_COLORS = ["#ff006e", "#06d6a0", "#ffbe0b", "#8338ec"];
 
-  // ── Tetromino shapes (relative coords, origin at 0,0) ──────────
+  // ── Tetromino shapes (relative coords) ─────────────────────────
   const SHAPES = {
     I: [[0,0],[0,1],[0,2],[0,3]],
     O: [[0,0],[0,1],[1,0],[1,1]],
@@ -24,14 +25,33 @@
   };
   const SHAPE_KEYS = Object.keys(SHAPES);
 
-  // ── Color Palettes ─────────────────────────────────────────────
+  // ── Color Palettes — bold, saturated, inspired by reference ────
   const PALETTES = {
-    neon:   ["#ff006e","#fb5607","#ffbe0b","#06d6a0","#118ab2","#8338ec","#ff69b4","#00f5d4"],
-    pastel: ["#ffc8dd","#ffafcc","#bde0fe","#a2d2ff","#cdb4db","#b8e0d2","#d4a5a5","#e8d5b7"],
-    earth:  ["#d4a373","#ccd5ae","#e9edc9","#faedcd","#fefae0","#a98467","#6b705c","#b7b7a4"],
-    mono:   ["#f8f9fa","#e9ecef","#dee2e6","#ced4da","#adb5bd","#6c757d","#495057","#343a40"],
-    sunset: ["#ff7b00","#ff8800","#ff9500","#ffa200","#ffaa00","#ffb700","#ffc300","#ffd000"],
-    ocean:  ["#03045e","#023e8a","#0077b6","#0096c7","#00b4d8","#48cae4","#90e0ef","#ade8f4"],
+    neon: [
+      ["#ff006e","#ff69b4"], ["#fb5607","#ff9e00"], ["#ffbe0b","#ffe66d"],
+      ["#06d6a0","#00f5d4"], ["#118ab2","#48cae4"], ["#8338ec","#b56eff"],
+      ["#ff0000","#ff6b6b"], ["#000000","#333333"], ["#ffffff","#e0e0e0"],
+    ],
+    pastel: [
+      ["#ffc8dd","#ffe0eb"], ["#ffafcc","#ffd6e7"], ["#bde0fe","#dceffe"],
+      ["#a2d2ff","#c8e3ff"], ["#cdb4db","#e4d5ed"], ["#b8e0d2","#d4f0e7"],
+    ],
+    earth: [
+      ["#d4a373","#e8c9a0"], ["#6b705c","#8a8d7b"], ["#a98467","#c9a88a"],
+      ["#ccd5ae","#e0e7cc"], ["#faedcd","#fdf5e6"], ["#b7b7a4","#d0d0c3"],
+    ],
+    mono: [
+      ["#ffffff","#e0e0e0"], ["#cccccc","#b0b0b0"], ["#888888","#707070"],
+      ["#555555","#404040"], ["#333333","#222222"], ["#000000","#1a1a1a"],
+    ],
+    sunset: [
+      ["#ff006e","#ff4d94"], ["#ff5400","#ff7b33"], ["#ffbe0b","#ffd04d"],
+      ["#ff0054","#ff3377"], ["#9b5de5","#b88ae8"], ["#f15bb5","#f590cf"],
+    ],
+    ocean: [
+      ["#03045e","#0a0f7a"], ["#0077b6","#1a9fd4"], ["#00b4d8","#33c8e5"],
+      ["#48cae4","#7adcee"], ["#90e0ef","#b3ecf5"], ["#023e8a","#0a5cad"],
+    ],
   };
 
   // ── State ──────────────────────────────────────────────────────
@@ -40,7 +60,9 @@
 
   let GRID = 36;
   let CELL = 0;
-  let board = [];
+  let board = [];        // GRID x GRID — stores piece ID (number) or 0
+  let pieceRegistry = {};// id → { cells:[{r,c}], color1, color2, cx, cy }
+  let nextPieceId = 1;
   let currentDir = DIR.TOP;
   let activePiece = null;
   let dropInterval = 400;
@@ -54,6 +76,26 @@
   let bgStyle = "dark";
   let gameOver = false;
   let piecesPlaced = 0;
+
+  // ── Helpers ────────────────────────────────────────────────────
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  function rgbToStr([r, g, b], a = 1) {
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  function lerpColor(hex1, hex2, t) {
+    const [r1,g1,b1] = hexToRgb(hex1);
+    const [r2,g2,b2] = hexToRgb(hex2);
+    return [
+      Math.round(r1 + (r2 - r1) * t),
+      Math.round(g1 + (g2 - g1) * t),
+      Math.round(b1 + (b2 - b1) * t),
+    ];
+  }
 
   // ── Init ───────────────────────────────────────────────────────
   function init() {
@@ -74,14 +116,26 @@
     GRID = parseInt(document.getElementById("grid-size").value) || 36;
     resize();
     board = Array.from({ length: GRID }, () => Array(GRID).fill(0));
+    pieceRegistry = {};
+    nextPieceId = 1;
+
     // Place seed block in the centre (2x2)
     const cx = Math.floor(GRID / 2);
     const cy = Math.floor(GRID / 2);
-    const seedColor = "#ffffff";
-    board[cx][cy] = seedColor;
-    board[cx - 1][cy] = seedColor;
-    board[cx][cy - 1] = seedColor;
-    board[cx - 1][cy - 1] = seedColor;
+    const seedId = nextPieceId++;
+    const seedCells = [
+      {r: cx-1, c: cy-1}, {r: cx-1, c: cy},
+      {r: cx, c: cy-1}, {r: cx, c: cy},
+    ];
+    for (const {r, c} of seedCells) board[r][c] = seedId;
+    pieceRegistry[seedId] = {
+      cells: seedCells,
+      color1: "#ffffff",
+      color2: "#e8e0f0",
+      cx: (cx - 0.5) * CELL + CELL / 2,
+      cy: (cy - 0.5) * CELL + CELL / 2,
+    };
+
     currentDir = DIR.TOP;
     activePiece = null;
     gameOver = false;
@@ -90,7 +144,7 @@
   }
 
   // ── Piece creation ─────────────────────────────────────────────
-  function randomColor() {
+  function randomColorPair() {
     const pal = PALETTES[palette] || PALETTES.neon;
     return pal[Math.floor(Math.random() * pal.length)];
   }
@@ -111,20 +165,19 @@
     const key = SHAPE_KEYS[Math.floor(Math.random() * SHAPE_KEYS.length)];
     const rotations = Math.floor(Math.random() * 4);
     const baseCells = rotateShape(SHAPES[key], rotations);
-    const color = randomColor();
+    const [color1, color2] = randomColorPair();
 
     let maxR = 0, maxC = 0;
     for (const [r, c] of baseCells) { maxR = Math.max(maxR, r); maxC = Math.max(maxC, c); }
 
     const shapeW = maxC + 1;
-    const shapeH = maxR + 1;
     const cx = Math.floor(GRID / 2);
     let cells;
 
     switch (currentDir) {
       case DIR.TOP: {
         const startCol = cx - Math.floor(shapeW / 2);
-        cells = baseCells.map(([r, c]) => ({ r: r, c: c + startCol }));
+        cells = baseCells.map(([r, c]) => ({ r, c: c + startCol }));
         break;
       }
       case DIR.BOTTOM: {
@@ -144,7 +197,6 @@
       }
     }
 
-    // Check if spawn location is blocked
     for (const cell of cells) {
       if (cell.r < 0 || cell.r >= GRID || cell.c < 0 || cell.c >= GRID) continue;
       if (board[cell.r][cell.c]) {
@@ -153,7 +205,7 @@
       }
     }
 
-    activePiece = { cells, color, dir: currentDir };
+    activePiece = { cells, color1, color2, dir: currentDir };
   }
 
   // ── Movement ───────────────────────────────────────────────────
@@ -187,11 +239,22 @@
 
   function lockPiece() {
     if (!activePiece) return;
+    const id = nextPieceId++;
+    let sumR = 0, sumC = 0;
     for (const { r, c } of activePiece.cells) {
       if (r >= 0 && r < GRID && c >= 0 && c < GRID) {
-        board[r][c] = activePiece.color;
+        board[r][c] = id;
       }
+      sumR += r;
+      sumC += c;
     }
+    pieceRegistry[id] = {
+      cells: activePiece.cells.map(({r,c}) => ({r,c})),
+      color1: activePiece.color1,
+      color2: activePiece.color2,
+      cx: (sumC / activePiece.cells.length + 0.5) * CELL,
+      cy: (sumR / activePiece.cells.length + 0.5) * CELL,
+    };
     piecesPlaced++;
     activePiece = null;
     advanceTurn();
@@ -235,12 +298,10 @@
       if (clockwise) return { r: pivot.r + dc, c: pivot.c - dr };
       else return { r: pivot.r - dc, c: pivot.c + dr };
     });
-
     let valid = true;
     for (const { r, c } of newCells) {
       if (r < 0 || r >= GRID || c < 0 || c >= GRID || board[r][c]) {
-        valid = false;
-        break;
+        valid = false; break;
       }
     }
     if (valid) activePiece.cells = newCells;
@@ -267,13 +328,14 @@
   }
 
   // ── Rendering ──────────────────────────────────────────────────
+
   function drawBg() {
     if (bgStyle === "light") {
       ctx.fillStyle = "#f0f0f0";
     } else if (bgStyle === "gradient") {
       const grad = ctx.createRadialGradient(
-        canvas.width / 2, canvas.height / 2, 0,
-        canvas.width / 2, canvas.height / 2, canvas.width * 0.7
+        canvas.width/2, canvas.height/2, 0,
+        canvas.width/2, canvas.height/2, canvas.width * 0.7
       );
       grad.addColorStop(0, "#1a1a2e");
       grad.addColorStop(1, "#0a0a0e");
@@ -284,65 +346,80 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
-  function drawGrid() {
+  function drawGridLines() {
     if (!showGrid) return;
     ctx.strokeStyle = bgStyle === "light" ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.04)";
     ctx.lineWidth = 0.5;
     for (let i = 0; i <= GRID; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * CELL, 0);
-      ctx.lineTo(i * CELL, canvas.height);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, i * CELL);
-      ctx.lineTo(canvas.width, i * CELL);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, canvas.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(canvas.width, i * CELL); ctx.stroke();
     }
   }
 
-  function drawCell(r, c, color, alpha = 1) {
-    const x = c * CELL;
-    const y = r * CELL;
-    const pad = 1;
+  // Pass 1: Draw soft bleeding glow halos behind each piece
+  function drawGlowPass() {
+    if (!showGlow) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
 
-    if (showShadow) {
-      ctx.fillStyle = "rgba(0,0,0,0.3)";
-      ctx.fillRect(x + pad + 2, y + pad + 2, CELL - pad * 2, CELL - pad * 2);
+    for (const id in pieceRegistry) {
+      const piece = pieceRegistry[id];
+      const bleedRadius = CELL * 3.5;
+      const grad = ctx.createRadialGradient(
+        piece.cx, piece.cy, 0,
+        piece.cx, piece.cy, bleedRadius
+      );
+      const rgb1 = hexToRgb(piece.color1);
+      grad.addColorStop(0, rgbToStr(rgb1, 0.35));
+      grad.addColorStop(0.4, rgbToStr(rgb1, 0.15));
+      grad.addColorStop(1, rgbToStr(rgb1, 0));
+      ctx.fillStyle = grad;
+      ctx.fillRect(
+        piece.cx - bleedRadius, piece.cy - bleedRadius,
+        bleedRadius * 2, bleedRadius * 2
+      );
     }
 
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = color;
-    ctx.fillRect(x + pad, y + pad, CELL - pad * 2, CELL - pad * 2);
-
-    // Inner highlight
-    ctx.fillStyle = "rgba(255,255,255,0.15)";
-    ctx.fillRect(x + pad, y + pad, CELL - pad * 2, 2);
-    ctx.fillRect(x + pad, y + pad, 2, CELL - pad * 2);
-
-    // Inner shadow
-    ctx.fillStyle = "rgba(0,0,0,0.2)";
-    ctx.fillRect(x + pad, y + CELL - pad - 2, CELL - pad * 2, 2);
-    ctx.fillRect(x + CELL - pad - 2, y + pad, 2, CELL - pad * 2);
-
-    if (showGlow) {
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 8;
-      ctx.fillStyle = color;
-      ctx.globalAlpha = alpha * 0.15;
-      ctx.fillRect(x + pad, y + pad, CELL - pad * 2, CELL - pad * 2);
-      ctx.shadowBlur = 0;
-      ctx.shadowColor = "transparent";
+    // Active piece glow
+    if (activePiece) {
+      let sumR = 0, sumC = 0;
+      for (const {r, c} of activePiece.cells) { sumR += r; sumC += c; }
+      const acx = (sumC / activePiece.cells.length + 0.5) * CELL;
+      const acy = (sumR / activePiece.cells.length + 0.5) * CELL;
+      const bleedRadius = CELL * 3;
+      const grad = ctx.createRadialGradient(acx, acy, 0, acx, acy, bleedRadius);
+      const rgb1 = hexToRgb(activePiece.color1);
+      grad.addColorStop(0, rgbToStr(rgb1, 0.3));
+      grad.addColorStop(0.5, rgbToStr(rgb1, 0.1));
+      grad.addColorStop(1, rgbToStr(rgb1, 0));
+      ctx.fillStyle = grad;
+      ctx.fillRect(acx - bleedRadius, acy - bleedRadius, bleedRadius * 2, bleedRadius * 2);
     }
 
-    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
+  // Pass 2: Draw flat filled cells with NO gaps, using per-piece gradient
   function drawBoard() {
-    for (let r = 0; r < GRID; r++) {
-      for (let c = 0; c < GRID; c++) {
-        if (board[r][c]) {
-          drawCell(r, c, board[r][c]);
-        }
+    for (const id in pieceRegistry) {
+      const piece = pieceRegistry[id];
+      for (const {r, c} of piece.cells) {
+        if (r < 0 || r >= GRID || c < 0 || c >= GRID) continue;
+        const x = c * CELL;
+        const y = r * CELL;
+
+        // Per-cell gradient based on distance from piece centre
+        const cellCx = x + CELL / 2;
+        const cellCy = y + CELL / 2;
+        const dx = cellCx - piece.cx;
+        const dy = cellCy - piece.cy;
+        const maxDist = CELL * 2.5;
+        const t = Math.min(1, Math.sqrt(dx*dx + dy*dy) / maxDist);
+        const blended = lerpColor(piece.color1, piece.color2, t);
+
+        ctx.fillStyle = rgbToStr(blended);
+        // Fill slightly oversized to eliminate subpixel gaps
+        ctx.fillRect(x - 0.5, y - 0.5, CELL + 1, CELL + 1);
       }
     }
   }
@@ -356,52 +433,54 @@
       let blocked = false;
       for (const { r, c } of next) {
         if (r < 0 || r >= GRID || c < 0 || c >= GRID || board[r][c]) {
-          blocked = true;
-          break;
+          blocked = true; break;
         }
       }
       if (blocked) break;
       ghost = next;
     }
+
+    const rgb = hexToRgb(activePiece.color1);
     for (const { r, c } of ghost) {
-      const x = c * CELL;
-      const y = r * CELL;
-      ctx.strokeStyle = activePiece.color;
-      ctx.globalAlpha = 0.3;
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x + 2, y + 2, CELL - 4, CELL - 4);
-      ctx.globalAlpha = 1;
+      ctx.fillStyle = rgbToStr(rgb, 0.15);
+      ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
     }
   }
 
   function drawActivePiece() {
     if (!activePiece) return;
+    let sumR = 0, sumC = 0;
+    for (const {r, c} of activePiece.cells) { sumR += r; sumC += c; }
+    const pcx = (sumC / activePiece.cells.length + 0.5) * CELL;
+    const pcy = (sumR / activePiece.cells.length + 0.5) * CELL;
+
     for (const { r, c } of activePiece.cells) {
-      if (r >= 0 && r < GRID && c >= 0 && c < GRID) {
-        drawCell(r, c, activePiece.color);
-      }
+      if (r < 0 || r >= GRID || c < 0 || c >= GRID) continue;
+      const x = c * CELL;
+      const y = r * CELL;
+      const cellCx = x + CELL / 2;
+      const cellCy = y + CELL / 2;
+      const dx = cellCx - pcx;
+      const dy = cellCy - pcy;
+      const maxDist = CELL * 2.5;
+      const t = Math.min(1, Math.sqrt(dx*dx + dy*dy) / maxDist);
+      const blended = lerpColor(activePiece.color1, activePiece.color2, t);
+
+      ctx.fillStyle = rgbToStr(blended);
+      ctx.fillRect(x - 0.5, y - 0.5, CELL + 1, CELL + 1);
     }
   }
 
   function drawDirectionIndicators() {
-    ctx.globalAlpha = 0.15;
+    ctx.globalAlpha = 0.2;
     ctx.fillStyle = DIR_COLORS[currentDir];
     const mid = canvas.width / 2;
-    const sz = 10;
-
+    const sz = 12;
     switch (currentDir) {
-      case DIR.TOP:
-        drawArrow(mid, 8, 0, 1, sz);
-        break;
-      case DIR.BOTTOM:
-        drawArrow(mid, canvas.height - 8, 0, -1, sz);
-        break;
-      case DIR.LEFT:
-        drawArrow(8, mid, 1, 0, sz);
-        break;
-      case DIR.RIGHT:
-        drawArrow(canvas.width - 8, mid, -1, 0, sz);
-        break;
+      case DIR.TOP:    drawArrow(mid, 10, 0, 1, sz); break;
+      case DIR.BOTTOM: drawArrow(mid, canvas.height - 10, 0, -1, sz); break;
+      case DIR.LEFT:   drawArrow(10, mid, 1, 0, sz); break;
+      case DIR.RIGHT:  drawArrow(canvas.width - 10, mid, -1, 0, sz); break;
     }
     ctx.globalAlpha = 1;
   }
@@ -425,7 +504,8 @@
     requestAnimationFrame(loop);
 
     drawBg();
-    drawGrid();
+    drawGridLines();
+    drawGlowPass();
     drawBoard();
     drawGhostPiece();
     drawActivePiece();
@@ -452,98 +532,45 @@
   function bindControls() {
     window.addEventListener("keydown", (e) => {
       if (gameOver && e.key !== "r") return;
-
       switch (e.key) {
-        case "ArrowLeft":
-          e.preventDefault();
-          moveLateral(-1);
-          break;
-        case "ArrowRight":
-          e.preventDefault();
-          moveLateral(1);
-          break;
+        case "ArrowLeft":  e.preventDefault(); moveLateral(-1); break;
+        case "ArrowRight": e.preventDefault(); moveLateral(1); break;
         case "ArrowDown":
           e.preventDefault();
-          if (activePiece) {
-            const { dr, dc } = getDelta(activePiece.dir);
-            movePiece(dr, dc);
-          }
+          if (activePiece) { const {dr,dc} = getDelta(activePiece.dir); movePiece(dr,dc); }
           break;
         case "ArrowUp":
           e.preventDefault();
-          if (activePiece) {
-            const { dr, dc } = getDelta(activePiece.dir);
-            movePiece(-dr, -dc);
-          }
+          if (activePiece) { const {dr,dc} = getDelta(activePiece.dir); movePiece(-dr,-dc); }
           break;
-        case " ":
-          e.preventDefault();
-          hardDrop();
-          break;
-        case "z": case "Z":
-          rotatePiece(false);
-          break;
-        case "x": case "X":
-          rotatePiece(true);
-          break;
-        case "Enter":
-          if (!activePiece) spawnPiece();
-          break;
-        case "p": case "P":
-          togglePause();
-          break;
-        case "r": case "R":
-          resetBoard();
-          break;
+        case " ":  e.preventDefault(); hardDrop(); break;
+        case "z": case "Z": rotatePiece(false); break;
+        case "x": case "X": rotatePiece(true); break;
+        case "Enter": if (!activePiece) spawnPiece(); break;
+        case "p": case "P": togglePause(); break;
+        case "r": case "R": resetBoard(); break;
       }
     });
 
-    // Panel toggles
     const ctrl = document.getElementById("controls");
     const showBtn = document.getElementById("btn-show-ctrl");
-
     document.getElementById("btn-toggle-ctrl").addEventListener("click", () => {
-      ctrl.classList.add("hidden");
-      showBtn.classList.add("visible");
+      ctrl.classList.add("hidden"); showBtn.classList.add("visible");
     });
-
     showBtn.addEventListener("click", () => {
-      ctrl.classList.remove("hidden");
-      showBtn.classList.remove("visible");
+      ctrl.classList.remove("hidden"); showBtn.classList.remove("visible");
     });
 
     document.getElementById("speed").addEventListener("input", (e) => {
       dropInterval = parseInt(e.target.value);
     });
-
-    document.getElementById("grid-size").addEventListener("change", () => {
-      resetBoard();
-    });
-
-    document.getElementById("palette").addEventListener("change", (e) => {
-      palette = e.target.value;
-    });
-
-    document.getElementById("bg-style").addEventListener("change", (e) => {
-      bgStyle = e.target.value;
-    });
-
-    document.getElementById("tog-grid").addEventListener("change", (e) => {
-      showGrid = e.target.checked;
-    });
-
-    document.getElementById("tog-glow").addEventListener("change", (e) => {
-      showGlow = e.target.checked;
-    });
-
-    document.getElementById("tog-shadow").addEventListener("change", (e) => {
-      showShadow = e.target.checked;
-    });
-
-    document.getElementById("tog-auto").addEventListener("change", (e) => {
-      autoPlay = e.target.checked;
-    });
-
+    document.getElementById("grid-size").addEventListener("change", () => resetBoard());
+    document.getElementById("palette").addEventListener("change", (e) => { palette = e.target.value; });
+    document.getElementById("bg-style").addEventListener("change", (e) => { bgStyle = e.target.value; });
+    document.getElementById("tog-grid").addEventListener("change", (e) => { showGrid = e.target.checked; });
+    document.getElementById("tog-glow").addEventListener("change", (e) => { showGlow = e.target.checked; });
+    document.getElementById("tog-shadow").addEventListener("change", (e) => { showShadow = e.target.checked; });
+    document.getElementById("tog-auto").addEventListener("change", (e) => { autoPlay = e.target.checked; });
     document.getElementById("btn-pause").addEventListener("click", togglePause);
     document.getElementById("btn-reset").addEventListener("click", resetBoard);
 
@@ -553,9 +580,7 @@
       link.href = canvas.toDataURL("image/png");
       link.click();
     });
-
     document.getElementById("btn-export").addEventListener("click", exportHighRes);
-
     window.addEventListener("resize", resize);
   }
 
@@ -565,43 +590,59 @@
   }
 
   function exportHighRes() {
-    const scale = 2;
+    const scale = 3;
     const expCanvas = document.createElement("canvas");
-    expCanvas.width = GRID * CELL * scale;
-    expCanvas.height = GRID * CELL * scale;
+    const w = GRID * CELL;
+    const h = GRID * CELL;
+    expCanvas.width = w * scale;
+    expCanvas.height = h * scale;
     const ectx = expCanvas.getContext("2d");
     ectx.scale(scale, scale);
 
+    // Background
     if (bgStyle === "light") {
       ectx.fillStyle = "#f0f0f0";
     } else if (bgStyle === "gradient") {
-      const grad = ectx.createRadialGradient(
-        canvas.width / 2, canvas.height / 2, 0,
-        canvas.width / 2, canvas.height / 2, canvas.width * 0.7
-      );
+      const grad = ectx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w * 0.7);
       grad.addColorStop(0, "#1a1a2e");
       grad.addColorStop(1, "#0a0a0e");
       ectx.fillStyle = grad;
     } else {
       ectx.fillStyle = "#0a0a0e";
     }
-    ectx.fillRect(0, 0, canvas.width, canvas.height);
+    ectx.fillRect(0, 0, w, h);
 
-    for (let r = 0; r < GRID; r++) {
-      for (let c = 0; c < GRID; c++) {
-        if (board[r][c]) {
-          const x = c * CELL + 1;
-          const y = r * CELL + 1;
-          const s = CELL - 2;
-          ectx.fillStyle = board[r][c];
-          ectx.fillRect(x, y, s, s);
-          ectx.fillStyle = "rgba(255,255,255,0.12)";
-          ectx.fillRect(x, y, s, 2);
-          ectx.fillRect(x, y, 2, s);
-          ectx.fillStyle = "rgba(0,0,0,0.18)";
-          ectx.fillRect(x, y + s - 2, s, 2);
-          ectx.fillRect(x + s - 2, y, 2, s);
-        }
+    // Glow pass
+    ectx.save();
+    ectx.globalCompositeOperation = "lighter";
+    for (const id in pieceRegistry) {
+      const piece = pieceRegistry[id];
+      const bleedRadius = CELL * 3.5;
+      const grad = ectx.createRadialGradient(piece.cx, piece.cy, 0, piece.cx, piece.cy, bleedRadius);
+      const rgb1 = hexToRgb(piece.color1);
+      grad.addColorStop(0, rgbToStr(rgb1, 0.35));
+      grad.addColorStop(0.4, rgbToStr(rgb1, 0.15));
+      grad.addColorStop(1, rgbToStr(rgb1, 0));
+      ectx.fillStyle = grad;
+      ectx.fillRect(piece.cx - bleedRadius, piece.cy - bleedRadius, bleedRadius * 2, bleedRadius * 2);
+    }
+    ectx.restore();
+
+    // Flat cells
+    for (const id in pieceRegistry) {
+      const piece = pieceRegistry[id];
+      for (const {r, c} of piece.cells) {
+        if (r < 0 || r >= GRID || c < 0 || c >= GRID) continue;
+        const x = c * CELL;
+        const y = r * CELL;
+        const cellCx = x + CELL / 2;
+        const cellCy = y + CELL / 2;
+        const dx = cellCx - piece.cx;
+        const dy = cellCy - piece.cy;
+        const t = Math.min(1, Math.sqrt(dx*dx + dy*dy) / (CELL * 2.5));
+        const blended = lerpColor(piece.color1, piece.color2, t);
+        ectx.fillStyle = rgbToStr(blended);
+        ectx.fillRect(x - 0.5, y - 0.5, CELL + 1, CELL + 1);
       }
     }
 
