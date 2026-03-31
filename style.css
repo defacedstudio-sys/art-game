@@ -2,97 +2,99 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --menu-bg: rgba(10, 10, 14, 0.88);
-  --menu-border: rgba(255, 255, 255, 0.08);
+  --bg: #0a0a0e;
+  --panel-bg: rgba(10, 10, 14, 0.92);
+  --panel-border: rgba(255, 255, 255, 0.08);
   --text: #e8e8ec;
   --text-muted: #888;
   --accent: #7c6ef0;
-  --record-red: #ef4444;
   --radius: 8px;
 }
 
 html, body {
   height: 100%;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: #0a0a0e;
+  background: var(--bg);
   color: var(--text);
   overflow: hidden;
   cursor: default;
 }
 
 /* ── Canvas ────────────────────────────────────────────────────── */
-#main-canvas {
+#game-canvas {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  max-width: 100vw;
-  max-height: 100vh;
-  object-fit: contain;
 }
 
-/* ── Drop overlay ──────────────────────────────────────────────── */
-#drop-overlay {
+/* ── HUD ───────────────────────────────────────────────────────── */
+#hud {
   position: fixed;
-  inset: 0;
-  background: rgba(10, 10, 14, 0.95);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-  cursor: pointer;
-}
-
-#drop-overlay.visible {
+  top: 20px;
+  left: 20px;
   display: flex;
-}
-
-#drop-overlay.dragover {
-  background: rgba(124, 110, 240, 0.15);
-}
-
-#drop-message {
-  display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 14px;
-  padding: 60px;
-  border: 2px dashed rgba(255, 255, 255, 0.15);
-  border-radius: 20px;
-  text-align: center;
-  pointer-events: none;
+  z-index: 30;
 }
 
-#drop-message p {
-  font-size: 1.1rem;
-  color: var(--text);
+#direction-indicator {
+  position: relative;
+  width: 50px;
+  height: 50px;
 }
 
-#drop-message .hint {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-
-#file-input {
+.dir-arrow {
   position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.15);
+  transition: background 0.3s, box-shadow 0.3s;
 }
 
-/* ── Menu panel ────────────────────────────────────────────────── */
-#menu {
+.dir-arrow.active {
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+}
+
+.dir-top    { top: 2px;   left: 50%; transform: translateX(-50%); }
+.dir-right  { right: 2px; top: 50%;  transform: translateY(-50%); }
+.dir-bottom { bottom: 2px;left: 50%; transform: translateX(-50%); }
+.dir-left   { left: 2px;  top: 50%;  transform: translateY(-50%); }
+
+.dir-center {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.3);
+}
+
+#turn-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--accent);
+  text-shadow: 0 0 10px rgba(124, 110, 240, 0.5);
+}
+
+/* ── Controls panel ────────────────────────────────────────────── */
+#controls {
   position: fixed;
   top: 20px;
   right: 20px;
-  width: 260px;
+  width: 250px;
   max-height: calc(100vh - 40px);
   overflow-y: auto;
-  background: var(--menu-bg);
-  border: 1px solid var(--menu-border);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
   border-radius: 14px;
   padding: 16px;
-  display: none;
+  display: flex;
   flex-direction: column;
   gap: 12px;
   z-index: 50;
@@ -101,17 +103,15 @@ html, body {
   user-select: none;
 }
 
-#menu.visible {
-  display: flex;
-}
+#controls.hidden { display: none; }
 
-#menu-header {
+.ctrl-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.menu-title {
+.ctrl-title {
   font-size: 0.85rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -119,7 +119,7 @@ html, body {
   color: var(--text-muted);
 }
 
-#btn-hide-menu {
+#btn-toggle-ctrl {
   background: none;
   border: none;
   color: var(--text-muted);
@@ -129,20 +129,24 @@ html, body {
   border-radius: 4px;
   transition: background 0.15s, color 0.15s;
 }
-
-#btn-hide-menu:hover {
+#btn-toggle-ctrl:hover {
   background: rgba(255,255,255,0.1);
   color: var(--text);
 }
 
-/* ── Menu sections ─────────────────────────────────────────────── */
-.menu-section {
+.ctrl-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ctrl-section {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.menu-section label {
+.ctrl-section label {
   font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -157,7 +161,7 @@ html, body {
   color: rgba(255,255,255,0.25);
 }
 
-/* ── Toggle row ────────────────────────────────────────────────── */
+/* ── Toggles ───────────────────────────────────────────────────── */
 .toggle-row {
   flex-direction: row !important;
   flex-wrap: wrap;
@@ -185,11 +189,9 @@ html, body {
   color: var(--text);
 }
 
-.toggle-label input {
-  display: none;
-}
+.toggle-label input { display: none; }
 
-/* ── Sliders ───────────────────────────────────────────────────── */
+/* ── Inputs ────────────────────────────────────────────────────── */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
@@ -203,8 +205,7 @@ input[type="range"] {
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 14px; height: 14px;
   background: var(--accent);
   border-radius: 50%;
   cursor: pointer;
@@ -212,26 +213,40 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 14px; height: 14px;
   background: var(--accent);
   border-radius: 50%;
   cursor: pointer;
   border: 2px solid rgba(255,255,255,0.2);
 }
 
+select {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+  cursor: pointer;
+  outline: none;
+}
+
+select:focus {
+  border-color: var(--accent);
+}
+
 /* ── Buttons ───────────────────────────────────────────────────── */
-.menu-buttons {
+.ctrl-buttons {
   flex-direction: row !important;
   gap: 8px !important;
 }
 
-.ctrl-btn {
+.btn {
   flex: 1;
   padding: 8px 10px;
   font-size: 0.78rem;
   font-weight: 600;
-  border: 1px solid var(--menu-border);
+  border: 1px solid var(--panel-border);
   border-radius: var(--radius);
   background: rgba(255,255,255,0.05);
   color: var(--text);
@@ -239,73 +254,48 @@ input[type="range"]::-moz-range-thumb {
   transition: background 0.15s, border-color 0.15s;
 }
 
-.ctrl-btn:hover {
+.btn:hover {
   background: rgba(255,255,255,0.1);
   border-color: rgba(255,255,255,0.15);
 }
 
-.ctrl-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
+.btn-accent {
+  background: rgba(124, 110, 240, 0.15);
+  border-color: rgba(124, 110, 240, 0.3);
+  color: #b0a4ff;
 }
 
-.record-btn {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #ff8888;
+.btn-accent:hover {
+  background: rgba(124, 110, 240, 0.25);
 }
 
-.record-btn:hover {
-  background: rgba(239, 68, 68, 0.25);
-}
-
-.stop-btn {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #ff8888;
-}
-
-/* ── Record status ─────────────────────────────────────────────── */
-#record-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  background: rgba(239, 68, 68, 0.1);
+.keys-info {
+  padding: 8px;
+  background: rgba(255,255,255,0.03);
   border-radius: var(--radius);
-  font-size: 0.78rem;
-  color: #ff8888;
 }
 
-#record-status.hidden {
-  display: none;
+.keys-info p {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 
-#record-indicator {
-  width: 8px;
-  height: 8px;
-  background: var(--record-red);
-  border-radius: 50%;
-  animation: blink 1s ease-in-out infinite;
+.keys-info b {
+  color: var(--text);
 }
 
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.2; }
-}
-
-/* ── Show menu button ──────────────────────────────────────────── */
-#btn-show-menu {
+/* ── Show button ───────────────────────────────────────────────── */
+#btn-show-ctrl {
   position: fixed;
   top: 20px;
   right: 20px;
   z-index: 40;
-  background: var(--menu-bg);
-  border: 1px solid var(--menu-border);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
   color: var(--text);
   font-size: 1.3rem;
-  width: 40px;
-  height: 40px;
+  width: 40px; height: 40px;
   border-radius: 10px;
   cursor: pointer;
   backdrop-filter: blur(20px);
@@ -314,40 +304,14 @@ input[type="range"]::-moz-range-thumb {
   display: none;
 }
 
-#btn-show-menu:hover {
+#btn-show-ctrl:hover {
   background: rgba(255,255,255,0.1);
 }
 
-#btn-show-menu.visible {
-  display: block;
-}
-
-.hidden {
-  display: none !important;
-}
-
-/* ── Toast ─────────────────────────────────────────────────────── */
-#toast {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(10, 10, 14, 0.9);
-  border: 1px solid var(--menu-border);
-  color: var(--text);
-  padding: 8px 20px;
-  border-radius: 24px;
-  font-size: 0.82rem;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.3s;
-  z-index: 999;
-  backdrop-filter: blur(10px);
-}
-
-#toast.visible { opacity: 1; }
+#btn-show-ctrl.visible { display: block; }
+.hidden { display: none !important; }
 
 /* ── Scrollbar ─────────────────────────────────────────────────── */
-#menu::-webkit-scrollbar { width: 4px; }
-#menu::-webkit-scrollbar-track { background: transparent; }
-#menu::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+#controls::-webkit-scrollbar { width: 4px; }
+#controls::-webkit-scrollbar-track { background: transparent; }
+#controls::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }

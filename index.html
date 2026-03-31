@@ -3,150 +3,79 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Abstract Art — Pixel Chunk Animator</title>
+  <title>Four-Way Tetris Art Engine</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <canvas id="main-canvas"></canvas>
+  <canvas id="game-canvas"></canvas>
 
-  <div id="drop-overlay" class="visible">
-    <div id="drop-message">
-      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="1.5">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-        <polyline points="17 8 12 3 7 8"/>
-        <line x1="12" y1="3" x2="12" y2="15"/>
-      </svg>
-      <p>Drop your artwork here or click to load</p>
-      <span class="hint">Supports PNG, JPG, WebP</span>
+  <div id="hud">
+    <div id="direction-indicator">
+      <div class="dir-arrow dir-top" id="arrow-top"></div>
+      <div class="dir-arrow dir-right" id="arrow-right"></div>
+      <div class="dir-arrow dir-bottom" id="arrow-bottom"></div>
+      <div class="dir-arrow dir-left" id="arrow-left"></div>
+      <div class="dir-center"></div>
     </div>
-    <input type="file" id="file-input" accept="image/*" />
+    <div id="turn-label">TOP</div>
   </div>
 
-  <div id="menu" class="visible">
-    <div id="menu-header">
-      <span class="menu-title">Controls</span>
-      <button id="btn-hide-menu" title="Hide menu">&#x2715;</button>
+  <div id="controls">
+    <div class="ctrl-header">
+      <span class="ctrl-title">Four-Way Tetris</span>
+      <button id="btn-toggle-ctrl" title="Toggle controls">&#x2715;</button>
     </div>
-
-    <!-- Toggles -->
-    <div class="menu-section toggle-row">
-      <label class="toggle-label"><input type="checkbox" id="tog-chunks" checked /><span>Chunks</span></label>
-      <label class="toggle-label"><input type="checkbox" id="tog-snakes" checked /><span>Snakes</span></label>
-      <label class="toggle-label"><input type="checkbox" id="tog-paint" checked /><span>Paint</span></label>
-      <label class="toggle-label"><input type="checkbox" id="tog-landscape" /><span>Landscape</span></label>
-      <label class="toggle-label"><input type="checkbox" id="tog-rhythm" /><span>Rhythm</span></label>
-      <label class="toggle-label"><input type="checkbox" id="tog-walkers" /><span>Walkers</span></label>
-      <label class="toggle-label"><input type="checkbox" id="tog-dog" /><span>Dog</span></label>
-      <label class="toggle-label"><input type="checkbox" id="tog-bird" /><span>Bird</span></label>
-    </div>
-
-    <div class="menu-section">
-      <label>Speed</label>
-      <input type="range" id="speed-slider" min="1" max="100" value="30" />
-      <div class="range-labels"><span>Slow</span><span>Fast</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Chunk Min Size</label>
-      <input type="range" id="min-size-slider" min="5" max="2000" value="30" />
-      <div class="range-labels"><span>5px</span><span>2000px</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Chunk Max Size</label>
-      <input type="range" id="max-size-slider" min="10" max="5000" value="150" />
-      <div class="range-labels"><span>10px</span><span>5000px</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Density</label>
-      <input type="range" id="density-slider" min="1" max="50" value="12" />
-      <div class="range-labels"><span>Sparse</span><span>Dense</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Max Edges</label>
-      <input type="range" id="edges-slider" min="4" max="40" value="20" />
-      <div class="range-labels"><span>4</span><span>40</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>White Bias</label>
-      <input type="range" id="white-bias-slider" min="0" max="100" value="0" />
-      <div class="range-labels"><span>None</span><span>Max</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Shape Style</label>
-      <input type="range" id="shape-style-slider" min="0" max="100" value="50" />
-      <div class="range-labels"><span>Stripes</span><span>Clumps</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Snakes</label>
-      <input type="range" id="wanderer-slider" min="0" max="30" value="5" />
-      <div class="range-labels"><span>None</span><span>30</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Snake Width</label>
-      <input type="range" id="wanderer-width-slider" min="4" max="120" value="20" />
-      <div class="range-labels"><span>Thin</span><span>Thick</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Paint Strokes</label>
-      <input type="range" id="paint-slider" min="0" max="20" value="4" />
-      <div class="range-labels"><span>None</span><span>20</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Paint Size</label>
-      <input type="range" id="paint-size-slider" min="10" max="400" value="60" />
-      <div class="range-labels"><span>Small</span><span>Large</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Rhythm BPM</label>
-      <input type="range" id="rhythm-slider" min="40" max="200" value="90" />
-      <div class="range-labels"><span>40</span><span>200</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Scramble</label>
-      <input type="range" id="drift-slider" min="0" max="100" value="0" />
-      <div class="range-labels"><span>Full Chaos</span><span>Stay in Place</span></div>
-    </div>
-
-    <div class="menu-section">
-      <label>Restore Original</label>
-      <input type="range" id="restore-slider" min="0" max="100" value="0" />
-      <div class="range-labels"><span>Animated</span><span>Original</span></div>
-    </div>
-
-    <div class="menu-section menu-buttons">
-      <button id="btn-pause" class="ctrl-btn">Pause</button>
-      <button id="btn-reset" class="ctrl-btn">Reset</button>
-    </div>
-
-    <div class="menu-section menu-buttons">
-      <button id="btn-record" class="ctrl-btn record-btn">Record MP4</button>
-      <button id="btn-stop-record" class="ctrl-btn stop-btn" disabled>Stop Recording</button>
-    </div>
-
-    <div id="record-status" class="hidden">
-      <span id="record-indicator"></span>
-      <span id="record-time">00:00</span>
-    </div>
-
-    <div class="menu-section">
-      <button id="btn-load-new" class="ctrl-btn">Load New Image</button>
+    <div class="ctrl-body">
+      <div class="ctrl-section">
+        <label>Speed</label>
+        <input type="range" id="speed" min="50" max="800" value="400" />
+        <div class="range-labels"><span>Fast</span><span>Slow</span></div>
+      </div>
+      <div class="ctrl-section">
+        <label>Grid Size</label>
+        <input type="range" id="grid-size" min="20" max="60" value="36" step="2" />
+        <div class="range-labels"><span>Small</span><span>Large</span></div>
+      </div>
+      <div class="ctrl-section">
+        <label>Color Palette</label>
+        <select id="palette">
+          <option value="neon">Neon</option>
+          <option value="pastel">Pastel</option>
+          <option value="earth">Earth</option>
+          <option value="mono">Mono</option>
+          <option value="sunset">Sunset</option>
+          <option value="ocean">Ocean</option>
+        </select>
+      </div>
+      <div class="ctrl-section">
+        <label>Background</label>
+        <select id="bg-style">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+          <option value="gradient">Gradient</option>
+        </select>
+      </div>
+      <div class="ctrl-section toggle-row">
+        <label class="toggle-label"><input type="checkbox" id="tog-grid" /><span>Grid Lines</span></label>
+        <label class="toggle-label"><input type="checkbox" id="tog-glow" checked /><span>Glow</span></label>
+        <label class="toggle-label"><input type="checkbox" id="tog-shadow" checked /><span>Shadows</span></label>
+        <label class="toggle-label"><input type="checkbox" id="tog-auto" checked /><span>Auto Play</span></label>
+      </div>
+      <div class="ctrl-section ctrl-buttons">
+        <button class="btn" id="btn-pause">Pause</button>
+        <button class="btn" id="btn-reset">Reset</button>
+      </div>
+      <div class="ctrl-section ctrl-buttons">
+        <button class="btn btn-accent" id="btn-screenshot">Screenshot</button>
+        <button class="btn btn-accent" id="btn-export">Export Art</button>
+      </div>
+      <div class="ctrl-section keys-info">
+        <p><b>Controls:</b> Arrow keys to move, Z/X to rotate, Space to drop, Enter for next turn</p>
+      </div>
     </div>
   </div>
 
-  <button id="btn-show-menu" class="hidden" title="Show menu">&#x2630;</button>
-
-  <div id="toast" aria-live="polite"></div>
+  <button id="btn-show-ctrl" class="hidden" title="Show controls">&#x2630;</button>
 
   <script src="game.js"></script>
 </body>
