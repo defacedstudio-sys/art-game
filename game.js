@@ -24,6 +24,51 @@
     L: [[0,0],[1,0],[2,0],[2,1]],
     J: [[0,1],[1,1],[2,0],[2,1]],
   };
+
+  // ── Face-feature shapes (per-cell colors) ─────────────────────
+  // Eye: 3x3 white block with black pupil in centre
+  // Nose: small shapes in red/pink
+  // Mouth: wide shapes in red/black
+  const FACE_SHAPES = {
+    EYE: {
+      cells: [[0,0],[0,1],[0,2],[1,0],[1,1],[1,2],[2,0],[2,1],[2,2]],
+      colors: ["#ffffff","#ffffff","#ffffff","#ffffff","#000000","#ffffff","#ffffff","#ffffff","#ffffff"],
+    },
+    EYE_WIDE: {
+      cells: [[0,0],[0,1],[0,2],[0,3],[1,0],[1,1],[1,2],[1,3],[2,0],[2,1],[2,2],[2,3]],
+      colors: ["#ffffff","#ffffff","#ffffff","#ffffff","#ffffff","#1a1a6e","#000000","#ffffff","#ffffff","#ffffff","#ffffff","#ffffff"],
+    },
+    NOSE_TRI: {
+      cells: [[0,1],[1,0],[1,1],[1,2]],
+      colors: ["#ff0000","#ff0000","#ff0000","#ff0000"],
+    },
+    NOSE_DOT: {
+      cells: [[0,0],[0,1],[1,0],[1,1]],
+      colors: ["#ff3355","#ff3355","#ff3355","#ff3355"],
+    },
+    NOSE_LONG: {
+      cells: [[0,0],[1,0],[2,0]],
+      colors: ["#ff4466","#ff2244","#ff0022"],
+    },
+    MOUTH_WIDE: {
+      cells: [[0,0],[0,1],[0,2],[0,3],[0,4]],
+      colors: ["#cc0000","#dd0000","#ee0000","#dd0000","#cc0000"],
+    },
+    MOUTH_SMILE: {
+      cells: [[0,0],[0,4],[1,1],[1,2],[1,3]],
+      colors: ["#000000","#000000","#cc0000","#cc0000","#cc0000"],
+    },
+    MOUTH_OPEN: {
+      cells: [[0,1],[0,2],[1,0],[1,3],[2,1],[2,2]],
+      colors: ["#000000","#000000","#cc0000","#cc0000","#000000","#000000"],
+    },
+    MOUTH_LIPS: {
+      cells: [[0,0],[0,1],[0,2],[0,3],[1,0],[1,1],[1,2],[1,3]],
+      colors: ["#ff2255","#ff0044","#ff0044","#ff2255","#cc0033","#aa0022","#aa0022","#cc0033"],
+    },
+  };
+  const FACE_SHAPE_KEYS = Object.keys(FACE_SHAPES);
+
   const SHAPE_KEYS = Object.keys(SHAPES);
 
   // ── Color Palettes — each entry is [primary, secondary] ───────
@@ -65,6 +110,7 @@
   let GRID = 36;
   let CELL = 0;
   let board = [];
+  let boardColor = []; // per-cell color hex (for face features & blending)
   let pieceRegistry = {};
   let nextPieceId = 1;
   let currentDir = DIR.TOP;
@@ -129,6 +175,7 @@
     GRID = parseInt(document.getElementById("grid-size").value) || 36;
     resize();
     board = Array.from({ length: GRID }, () => Array(GRID).fill(0));
+    boardColor = Array.from({ length: GRID }, () => Array(GRID).fill(null));
     pieceRegistry = {};
     nextPieceId = 1;
 
@@ -139,7 +186,10 @@
       { r: cx - 1, c: cy - 1 }, { r: cx - 1, c: cy },
       { r: cx, c: cy - 1 }, { r: cx, c: cy },
     ];
-    for (const { r, c } of seedCells) board[r][c] = seedId;
+    for (const { r, c } of seedCells) {
+      board[r][c] = seedId;
+      boardColor[r][c] = "#ffffff";
+    }
     pieceRegistry[seedId] = {
       cells: seedCells,
       color1: "#ffffff",
@@ -170,10 +220,43 @@
     return out.map(([r, c]) => [r - minR, c - minC]);
   }
 
+  // Rotate cell colors to match the new cell order after rotateShape
+  function rotateCellColors(origCells, origColors, times) {
+    // Apply same rotation to get the mapping
+    let rotated = origCells.map(([r, c], i) => ({ r, c, color: origColors[i] }));
+    for (let t = 0; t < times; t++) {
+      rotated = rotated.map(({ r, c, color }) => ({ r: c, c: -r, color }));
+    }
+    let minR = Infinity, minC = Infinity;
+    for (const p of rotated) { minR = Math.min(minR, p.r); minC = Math.min(minC, p.c); }
+    rotated = rotated.map(p => ({ r: p.r - minR, c: p.c - minC, color: p.color }));
+    // Sort to match the order rotateShape produces (same normalisation)
+    const rotatedCells = rotateShape(origCells, times);
+    const colorMap = new Map();
+    for (const p of rotated) colorMap.set(`${p.r},${p.c}`, p.color);
+    return rotatedCells.map(([r, c]) => colorMap.get(`${r},${c}`) || "#ffffff");
+  }
+
   function spawnPiece() {
     if (gameOver) return;
-    const key = SHAPE_KEYS[Math.floor(Math.random() * SHAPE_KEYS.length)];
-    const baseCells = rotateShape(SHAPES[key], Math.floor(Math.random() * 4));
+
+    // ~30% chance to spawn a face feature, 70% regular tetromino
+    const isFace = Math.random() < 0.3;
+    let baseCells, cellColors = null;
+
+    if (isFace) {
+      const fkey = FACE_SHAPE_KEYS[Math.floor(Math.random() * FACE_SHAPE_KEYS.length)];
+      const face = FACE_SHAPES[fkey];
+      const rotations = Math.floor(Math.random() * 4);
+      baseCells = rotateShape(face.cells, rotations);
+      // Rotate cell colors to match rotated cell order
+      // rotateShape normalises positions, so we need to map original→rotated
+      cellColors = rotateCellColors(face.cells, face.colors, rotations);
+    } else {
+      const key = SHAPE_KEYS[Math.floor(Math.random() * SHAPE_KEYS.length)];
+      baseCells = rotateShape(SHAPES[key], Math.floor(Math.random() * 4));
+    }
+
     const [color1, color2] = randomColorPair();
 
     let maxC = 0;
@@ -209,7 +292,7 @@
       if (cell.r < 0 || cell.r >= GRID || cell.c < 0 || cell.c >= GRID) continue;
       if (board[cell.r][cell.c]) { advanceTurn(); return; }
     }
-    activePiece = { cells, color1, color2, dir: currentDir };
+    activePiece = { cells, color1, color2, dir: currentDir, cellColors };
   }
 
   // ── Movement ───────────────────────────────────────────────────
@@ -244,8 +327,15 @@
     if (!activePiece) return;
     const id = nextPieceId++;
     let sumR = 0, sumC = 0;
-    for (const { r, c } of activePiece.cells) {
-      if (r >= 0 && r < GRID && c >= 0 && c < GRID) board[r][c] = id;
+    for (let i = 0; i < activePiece.cells.length; i++) {
+      const { r, c } = activePiece.cells[i];
+      if (r >= 0 && r < GRID && c >= 0 && c < GRID) {
+        board[r][c] = id;
+        // Per-cell color: face features use cellColors, regular pieces use color1
+        boardColor[r][c] = activePiece.cellColors
+          ? activePiece.cellColors[i]
+          : activePiece.color1;
+      }
       sumR += r; sumC += c;
     }
     pieceRegistry[id] = {
@@ -316,12 +406,6 @@
   function rebuildColorGrid() {
     colorGrid = Array.from({ length: GRID }, () => Array(GRID).fill(null));
 
-    // Build a lookup: pieceId → rgb of color1
-    const pieceRgb = {};
-    for (const id in pieceRegistry) {
-      pieceRgb[id] = hexToRgb(pieceRegistry[id].color1);
-    }
-
     for (let r = 0; r < GRID; r++) {
       for (let c = 0; c < GRID; c++) {
         if (!board[r][c]) continue;
@@ -333,10 +417,10 @@
           for (let dc = -rad; dc <= rad; dc++) {
             const nr = r + dr, nc = c + dc;
             if (nr < 0 || nr >= GRID || nc < 0 || nc >= GRID) continue;
-            const pid = board[nr][nc];
-            if (!pid) continue;
-            const rgb = pieceRgb[pid];
-            if (!rgb) continue;
+            if (!board[nr][nc]) continue;
+            const hex = boardColor[nr][nc];
+            if (!hex) continue;
+            const rgb = hexToRgb(hex);
             const dist = Math.sqrt(dr * dr + dc * dc);
             const w = 1 / (1 + dist * 1.2);
             tR += rgb[0] * w;
@@ -470,14 +554,19 @@
       }
     }
 
-    // Active piece cells
+    // Active piece cells (with per-cell color support for face features)
     if (activePiece) {
-      const [pr, pg, pb] = hexToRgb(activePiece.color1);
-      // Blend active piece with nearby board cells
-      for (const { r, c } of activePiece.cells) {
+      for (let i = 0; i < activePiece.cells.length; i++) {
+        const { r, c } = activePiece.cells[i];
         if (r < 0 || r >= GRID || c < 0 || c >= GRID) continue;
 
-        let tR = pr * 2, tG = pg * 2, tB = pb * 2, tW = 2; // self weight
+        // Use per-cell color if face feature, otherwise piece color
+        const cellHex = activePiece.cellColors
+          ? activePiece.cellColors[i]
+          : activePiece.color1;
+        const [pr, pg, pb] = hexToRgb(cellHex);
+
+        let tR = pr * 2, tG = pg * 2, tB = pb * 2, tW = 2;
         for (let dr = -blendRadius; dr <= blendRadius; dr++) {
           for (let dc = -blendRadius; dc <= blendRadius; dc++) {
             if (dr === 0 && dc === 0) continue;
@@ -511,9 +600,13 @@
       if (blocked) break;
       ghost = next;
     }
-    const [pr, pg, pb] = hexToRgb(activePiece.color1);
-    ctx.fillStyle = rgbStr(pr, pg, pb, 0.12);
-    for (const { r, c } of ghost) ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+    for (let i = 0; i < ghost.length; i++) {
+      const { r, c } = ghost[i];
+      const hex = activePiece.cellColors ? activePiece.cellColors[i] : activePiece.color1;
+      const [pr, pg, pb] = hexToRgb(hex);
+      ctx.fillStyle = rgbStr(pr, pg, pb, 0.12);
+      ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+    }
   }
 
   function drawDirectionIndicators() {
