@@ -2,7 +2,8 @@
    Four-Way Tetris Art Engine
    Blocks fall from TOP, RIGHT, BOTTOM, LEFT in turn,
    clustering around a seed block in the centre.
-   Inspired by bold, flat illustration with bleeding radial gradients.
+   Shapes merge into one organic blob with cross-piece gradient
+   blending and soft rounded edges.
    ═══════════════════════════════════════════════════════════════════ */
 
 (() => {
@@ -13,7 +14,7 @@
   const DIR_NAMES = ["TOP", "RIGHT", "BOTTOM", "LEFT"];
   const DIR_COLORS = ["#ff006e", "#06d6a0", "#ffbe0b", "#8338ec"];
 
-  // ── Tetromino shapes (relative coords) ─────────────────────────
+  // ── Tetromino shapes ───────────────────────────────────────────
   const SHAPES = {
     I: [[0,0],[0,1],[0,2],[0,3]],
     O: [[0,0],[0,1],[1,0],[1,1]],
@@ -25,7 +26,7 @@
   };
   const SHAPE_KEYS = Object.keys(SHAPES);
 
-  // ── Color Palettes — bold, saturated, inspired by reference ────
+  // ── Color Palettes — each entry is [primary, secondary] ───────
   const PALETTES = {
     neon: [
       ["#ff006e","#ff69b4"], ["#fb5607","#ff9e00"], ["#ffbe0b","#ffe66d"],
@@ -58,10 +59,13 @@
   const canvas = document.getElementById("game-canvas");
   const ctx = canvas.getContext("2d");
 
+  // Offscreen canvases for the blur-mask pipeline
+  let colorCvs, colorCtx, maskCvs, maskCtx;
+
   let GRID = 36;
   let CELL = 0;
-  let board = [];        // GRID x GRID — stores piece ID (number) or 0
-  let pieceRegistry = {};// id → { cells:[{r,c}], color1, color2, cx, cy }
+  let board = [];
+  let pieceRegistry = {};
   let nextPieceId = 1;
   let currentDir = DIR.TOP;
   let activePiece = null;
@@ -71,11 +75,15 @@
   let autoPlay = true;
   let showGrid = false;
   let showGlow = true;
-  let showShadow = true;
   let palette = "neon";
   let bgStyle = "dark";
   let gameOver = false;
   let piecesPlaced = 0;
+  let blendRadius = 3; // how many cells to blend across
+
+  // Pre-computed blended color grid (updated when board changes)
+  let colorGrid = [];   // GRID x GRID → [r,g,b] or null
+  let colorGridDirty = true;
 
   // ── Helpers ────────────────────────────────────────────────────
   function hexToRgb(hex) {
@@ -83,18 +91,9 @@
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   }
 
-  function rgbToStr([r, g, b], a = 1) {
-    return `rgba(${r},${g},${b},${a})`;
-  }
-
-  function lerpColor(hex1, hex2, t) {
-    const [r1,g1,b1] = hexToRgb(hex1);
-    const [r2,g2,b2] = hexToRgb(hex2);
-    return [
-      Math.round(r1 + (r2 - r1) * t),
-      Math.round(g1 + (g2 - g1) * t),
-      Math.round(b1 + (b2 - b1) * t),
-    ];
+  function rgbStr(r, g, b, a) {
+    if (a !== undefined) return `rgba(${r},${g},${b},${a})`;
+    return `rgb(${r},${g},${b})`;
   }
 
   // ── Init ───────────────────────────────────────────────────────
@@ -105,11 +104,25 @@
     requestAnimationFrame(loop);
   }
 
+  function createOffscreen() {
+    colorCvs = document.createElement("canvas");
+    colorCvs.width = canvas.width;
+    colorCvs.height = canvas.height;
+    colorCtx = colorCvs.getContext("2d");
+
+    maskCvs = document.createElement("canvas");
+    maskCvs.width = canvas.width;
+    maskCvs.height = canvas.height;
+    maskCtx = maskCvs.getContext("2d");
+  }
+
   function resize() {
     const size = Math.min(window.innerWidth, window.innerHeight) * 0.88;
     CELL = Math.floor(size / GRID);
     canvas.width = GRID * CELL;
     canvas.height = GRID * CELL;
+    createOffscreen();
+    colorGridDirty = true;
   }
 
   function resetBoard() {
@@ -119,15 +132,14 @@
     pieceRegistry = {};
     nextPieceId = 1;
 
-    // Place seed block in the centre (2x2)
     const cx = Math.floor(GRID / 2);
     const cy = Math.floor(GRID / 2);
     const seedId = nextPieceId++;
     const seedCells = [
-      {r: cx-1, c: cy-1}, {r: cx-1, c: cy},
-      {r: cx, c: cy-1}, {r: cx, c: cy},
+      { r: cx - 1, c: cy - 1 }, { r: cx - 1, c: cy },
+      { r: cx, c: cy - 1 }, { r: cx, c: cy },
     ];
-    for (const {r, c} of seedCells) board[r][c] = seedId;
+    for (const { r, c } of seedCells) board[r][c] = seedId;
     pieceRegistry[seedId] = {
       cells: seedCells,
       color1: "#ffffff",
@@ -140,6 +152,7 @@
     activePiece = null;
     gameOver = false;
     piecesPlaced = 0;
+    colorGridDirty = true;
     updateHUD();
   }
 
@@ -151,9 +164,7 @@
 
   function rotateShape(cells, times) {
     let out = cells.map(([r, c]) => [r, c]);
-    for (let t = 0; t < times; t++) {
-      out = out.map(([r, c]) => [c, -r]);
-    }
+    for (let t = 0; t < times; t++) out = out.map(([r, c]) => [c, -r]);
     let minR = Infinity, minC = Infinity;
     for (const [r, c] of out) { minR = Math.min(minR, r); minC = Math.min(minC, c); }
     return out.map(([r, c]) => [r - minR, c - minC]);
@@ -161,50 +172,43 @@
 
   function spawnPiece() {
     if (gameOver) return;
-
     const key = SHAPE_KEYS[Math.floor(Math.random() * SHAPE_KEYS.length)];
-    const rotations = Math.floor(Math.random() * 4);
-    const baseCells = rotateShape(SHAPES[key], rotations);
+    const baseCells = rotateShape(SHAPES[key], Math.floor(Math.random() * 4));
     const [color1, color2] = randomColorPair();
 
-    let maxR = 0, maxC = 0;
-    for (const [r, c] of baseCells) { maxR = Math.max(maxR, r); maxC = Math.max(maxC, c); }
-
+    let maxC = 0;
+    for (const [, c] of baseCells) maxC = Math.max(maxC, c);
     const shapeW = maxC + 1;
     const cx = Math.floor(GRID / 2);
     let cells;
 
     switch (currentDir) {
       case DIR.TOP: {
-        const startCol = cx - Math.floor(shapeW / 2);
-        cells = baseCells.map(([r, c]) => ({ r, c: c + startCol }));
+        const sc = cx - Math.floor(shapeW / 2);
+        cells = baseCells.map(([r, c]) => ({ r, c: c + sc }));
         break;
       }
       case DIR.BOTTOM: {
-        const startCol = cx - Math.floor(shapeW / 2);
-        cells = baseCells.map(([r, c]) => ({ r: GRID - 1 - r, c: c + startCol }));
+        const sc = cx - Math.floor(shapeW / 2);
+        cells = baseCells.map(([r, c]) => ({ r: GRID - 1 - r, c: c + sc }));
         break;
       }
       case DIR.LEFT: {
-        const startRow = cx - Math.floor(shapeW / 2);
-        cells = baseCells.map(([r, c]) => ({ r: c + startRow, c: r }));
+        const sr = cx - Math.floor(shapeW / 2);
+        cells = baseCells.map(([r, c]) => ({ r: c + sr, c: r }));
         break;
       }
       case DIR.RIGHT: {
-        const startRow = cx - Math.floor(shapeW / 2);
-        cells = baseCells.map(([r, c]) => ({ r: c + startRow, c: GRID - 1 - r }));
+        const sr = cx - Math.floor(shapeW / 2);
+        cells = baseCells.map(([r, c]) => ({ r: c + sr, c: GRID - 1 - r }));
         break;
       }
     }
 
     for (const cell of cells) {
       if (cell.r < 0 || cell.r >= GRID || cell.c < 0 || cell.c >= GRID) continue;
-      if (board[cell.r][cell.c]) {
-        advanceTurn();
-        return;
-      }
+      if (board[cell.r][cell.c]) { advanceTurn(); return; }
     }
-
     activePiece = { cells, color1, color2, dir: currentDir };
   }
 
@@ -220,8 +224,7 @@
 
   function canMove(cells, dr, dc) {
     for (const { r, c } of cells) {
-      const nr = r + dr;
-      const nc = c + dc;
+      const nr = r + dr, nc = c + dc;
       if (nr < 0 || nr >= GRID || nc < 0 || nc >= GRID) return false;
       if (board[nr][nc]) return false;
     }
@@ -242,14 +245,11 @@
     const id = nextPieceId++;
     let sumR = 0, sumC = 0;
     for (const { r, c } of activePiece.cells) {
-      if (r >= 0 && r < GRID && c >= 0 && c < GRID) {
-        board[r][c] = id;
-      }
-      sumR += r;
-      sumC += c;
+      if (r >= 0 && r < GRID && c >= 0 && c < GRID) board[r][c] = id;
+      sumR += r; sumC += c;
     }
     pieceRegistry[id] = {
-      cells: activePiece.cells.map(({r,c}) => ({r,c})),
+      cells: activePiece.cells.map(({ r, c }) => ({ r, c })),
       color1: activePiece.color1,
       color2: activePiece.color2,
       cx: (sumC / activePiece.cells.length + 0.5) * CELL,
@@ -257,15 +257,15 @@
     };
     piecesPlaced++;
     activePiece = null;
+    colorGridDirty = true;
     advanceTurn();
   }
 
   function hardDrop() {
     if (!activePiece) return;
     const { dr, dc } = getDelta(activePiece.dir);
-    while (canMove(activePiece.cells, dr, dc)) {
+    while (canMove(activePiece.cells, dr, dc))
       activePiece.cells = activePiece.cells.map(({ r, c }) => ({ r: r + dr, c: c + dc }));
-    }
     lockPiece();
   }
 
@@ -278,33 +278,22 @@
   function moveLateral(primary) {
     if (!activePiece) return;
     let dr = 0, dc = 0;
-    switch (activePiece.dir) {
-      case DIR.TOP:
-      case DIR.BOTTOM:
-        dc = primary; break;
-      case DIR.LEFT:
-      case DIR.RIGHT:
-        dr = primary; break;
-    }
+    const d = activePiece.dir;
+    if (d === DIR.TOP || d === DIR.BOTTOM) dc = primary;
+    else dr = primary;
     movePiece(dr, dc);
   }
 
   function rotatePiece(clockwise) {
     if (!activePiece) return;
-    const pivot = activePiece.cells[0];
-    const newCells = activePiece.cells.map(({ r, c }) => {
-      const dr = r - pivot.r;
-      const dc = c - pivot.c;
-      if (clockwise) return { r: pivot.r + dc, c: pivot.c - dr };
-      else return { r: pivot.r - dc, c: pivot.c + dr };
+    const pv = activePiece.cells[0];
+    const nc = activePiece.cells.map(({ r, c }) => {
+      const dr = r - pv.r, dc = c - pv.c;
+      return clockwise ? { r: pv.r + dc, c: pv.c - dr } : { r: pv.r - dc, c: pv.c + dr };
     });
-    let valid = true;
-    for (const { r, c } of newCells) {
-      if (r < 0 || r >= GRID || c < 0 || c >= GRID || board[r][c]) {
-        valid = false; break;
-      }
-    }
-    if (valid) activePiece.cells = newCells;
+    for (const { r, c } of nc)
+      if (r < 0 || r >= GRID || c < 0 || c >= GRID || board[r][c]) return;
+    activePiece.cells = nc;
   }
 
   // ── HUD ────────────────────────────────────────────────────────
@@ -313,37 +302,78 @@
     label.textContent = DIR_NAMES[currentDir];
     label.style.color = DIR_COLORS[currentDir];
     label.style.textShadow = `0 0 10px ${DIR_COLORS[currentDir]}80`;
-
     ["top", "right", "bottom", "left"].forEach((name, i) => {
       const el = document.getElementById("arrow-" + name);
       el.classList.toggle("active", i === currentDir);
-      if (i === currentDir) {
-        el.style.background = DIR_COLORS[i];
-        el.style.boxShadow = `0 0 12px ${DIR_COLORS[i]}`;
-      } else {
-        el.style.background = "";
-        el.style.boxShadow = "";
-      }
+      el.style.background = i === currentDir ? DIR_COLORS[i] : "";
+      el.style.boxShadow = i === currentDir ? `0 0 12px ${DIR_COLORS[i]}` : "";
     });
+  }
+
+  // ── Color blending across pieces ───────────────────────────────
+  // For each occupied cell, blend colors from all nearby pieces
+  // weighted by inverse distance → colors merge at boundaries
+  function rebuildColorGrid() {
+    colorGrid = Array.from({ length: GRID }, () => Array(GRID).fill(null));
+
+    // Build a lookup: pieceId → rgb of color1
+    const pieceRgb = {};
+    for (const id in pieceRegistry) {
+      pieceRgb[id] = hexToRgb(pieceRegistry[id].color1);
+    }
+
+    for (let r = 0; r < GRID; r++) {
+      for (let c = 0; c < GRID; c++) {
+        if (!board[r][c]) continue;
+
+        let tR = 0, tG = 0, tB = 0, tW = 0;
+        const rad = blendRadius;
+
+        for (let dr = -rad; dr <= rad; dr++) {
+          for (let dc = -rad; dc <= rad; dc++) {
+            const nr = r + dr, nc = c + dc;
+            if (nr < 0 || nr >= GRID || nc < 0 || nc >= GRID) continue;
+            const pid = board[nr][nc];
+            if (!pid) continue;
+            const rgb = pieceRgb[pid];
+            if (!rgb) continue;
+            const dist = Math.sqrt(dr * dr + dc * dc);
+            const w = 1 / (1 + dist * 1.2);
+            tR += rgb[0] * w;
+            tG += rgb[1] * w;
+            tB += rgb[2] * w;
+            tW += w;
+          }
+        }
+
+        if (tW > 0) {
+          colorGrid[r][c] = [
+            Math.round(tR / tW),
+            Math.round(tG / tW),
+            Math.round(tB / tW),
+          ];
+        }
+      }
+    }
+    colorGridDirty = false;
   }
 
   // ── Rendering ──────────────────────────────────────────────────
 
-  function drawBg() {
+  function drawBg(target) {
+    const c = target || ctx;
+    const w = canvas.width, h = canvas.height;
     if (bgStyle === "light") {
-      ctx.fillStyle = "#f0f0f0";
+      c.fillStyle = "#f0f0f0";
     } else if (bgStyle === "gradient") {
-      const grad = ctx.createRadialGradient(
-        canvas.width/2, canvas.height/2, 0,
-        canvas.width/2, canvas.height/2, canvas.width * 0.7
-      );
+      const grad = c.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.7);
       grad.addColorStop(0, "#1a1a2e");
       grad.addColorStop(1, "#0a0a0e");
-      ctx.fillStyle = grad;
+      c.fillStyle = grad;
     } else {
-      ctx.fillStyle = "#0a0a0e";
+      c.fillStyle = "#0a0a0e";
     }
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    c.fillRect(0, 0, w, h);
   }
 
   function drawGridLines() {
@@ -356,70 +386,114 @@
     }
   }
 
-  // Pass 1: Draw soft bleeding glow halos behind each piece
+  // Glow pass — large soft radial gradients under each piece
   function drawGlowPass() {
     if (!showGlow) return;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-
     for (const id in pieceRegistry) {
       const piece = pieceRegistry[id];
-      const bleedRadius = CELL * 3.5;
-      const grad = ctx.createRadialGradient(
-        piece.cx, piece.cy, 0,
-        piece.cx, piece.cy, bleedRadius
-      );
-      const rgb1 = hexToRgb(piece.color1);
-      grad.addColorStop(0, rgbToStr(rgb1, 0.35));
-      grad.addColorStop(0.4, rgbToStr(rgb1, 0.15));
-      grad.addColorStop(1, rgbToStr(rgb1, 0));
+      const br = CELL * 4;
+      const grad = ctx.createRadialGradient(piece.cx, piece.cy, 0, piece.cx, piece.cy, br);
+      const [pr, pg, pb] = hexToRgb(piece.color1);
+      grad.addColorStop(0, rgbStr(pr, pg, pb, 0.30));
+      grad.addColorStop(0.35, rgbStr(pr, pg, pb, 0.12));
+      grad.addColorStop(1, rgbStr(pr, pg, pb, 0));
       ctx.fillStyle = grad;
-      ctx.fillRect(
-        piece.cx - bleedRadius, piece.cy - bleedRadius,
-        bleedRadius * 2, bleedRadius * 2
-      );
+      ctx.fillRect(piece.cx - br, piece.cy - br, br * 2, br * 2);
     }
-
-    // Active piece glow
     if (activePiece) {
-      let sumR = 0, sumC = 0;
-      for (const {r, c} of activePiece.cells) { sumR += r; sumC += c; }
-      const acx = (sumC / activePiece.cells.length + 0.5) * CELL;
-      const acy = (sumR / activePiece.cells.length + 0.5) * CELL;
-      const bleedRadius = CELL * 3;
-      const grad = ctx.createRadialGradient(acx, acy, 0, acx, acy, bleedRadius);
-      const rgb1 = hexToRgb(activePiece.color1);
-      grad.addColorStop(0, rgbToStr(rgb1, 0.3));
-      grad.addColorStop(0.5, rgbToStr(rgb1, 0.1));
-      grad.addColorStop(1, rgbToStr(rgb1, 0));
+      let sR = 0, sC = 0;
+      for (const { r, c } of activePiece.cells) { sR += r; sC += c; }
+      const ax = (sC / activePiece.cells.length + 0.5) * CELL;
+      const ay = (sR / activePiece.cells.length + 0.5) * CELL;
+      const br = CELL * 3;
+      const [pr, pg, pb] = hexToRgb(activePiece.color1);
+      const grad = ctx.createRadialGradient(ax, ay, 0, ax, ay, br);
+      grad.addColorStop(0, rgbStr(pr, pg, pb, 0.25));
+      grad.addColorStop(0.5, rgbStr(pr, pg, pb, 0.08));
+      grad.addColorStop(1, rgbStr(pr, pg, pb, 0));
       ctx.fillStyle = grad;
-      ctx.fillRect(acx - bleedRadius, acy - bleedRadius, bleedRadius * 2, bleedRadius * 2);
+      ctx.fillRect(ax - br, ay - br, br * 2, br * 2);
     }
-
     ctx.restore();
   }
 
-  // Pass 2: Draw flat filled cells with NO gaps, using per-piece gradient
-  function drawBoard() {
-    for (const id in pieceRegistry) {
-      const piece = pieceRegistry[id];
-      for (const {r, c} of piece.cells) {
+  // Build rounded-edge mask using blur + threshold technique
+  function buildMask() {
+    const w = canvas.width, h = canvas.height;
+    maskCtx.clearRect(0, 0, w, h);
+
+    // Draw occupied cells as white
+    maskCtx.fillStyle = "#fff";
+    for (let r = 0; r < GRID; r++) {
+      for (let c = 0; c < GRID; c++) {
+        if (board[r][c]) maskCtx.fillRect(c * CELL, r * CELL, CELL, CELL);
+      }
+    }
+    // Also include active piece
+    if (activePiece) {
+      for (const { r, c } of activePiece.cells) {
+        if (r >= 0 && r < GRID && c >= 0 && c < GRID)
+          maskCtx.fillRect(c * CELL, r * CELL, CELL, CELL);
+      }
+    }
+
+    // Blur the mask to soften edges
+    const blurPx = Math.max(3, Math.round(CELL * 0.45));
+    maskCtx.filter = `blur(${blurPx}px)`;
+    maskCtx.drawImage(maskCvs, 0, 0);
+    maskCtx.filter = "none";
+
+    // Re-sharpen by drawing on itself several times (threshold effect)
+    // This keeps interior fully opaque but rounds corners
+    maskCtx.globalCompositeOperation = "source-over";
+    for (let i = 0; i < 6; i++) {
+      maskCtx.drawImage(maskCvs, 0, 0);
+    }
+  }
+
+  // Draw blended color field to offscreen color canvas
+  function drawColorField() {
+    if (colorGridDirty) rebuildColorGrid();
+
+    const w = canvas.width, h = canvas.height;
+    colorCtx.clearRect(0, 0, w, h);
+
+    // Board cells with blended colors
+    for (let r = 0; r < GRID; r++) {
+      for (let c = 0; c < GRID; c++) {
+        const rgb = colorGrid[r][c];
+        if (!rgb) continue;
+        colorCtx.fillStyle = rgbStr(rgb[0], rgb[1], rgb[2]);
+        colorCtx.fillRect(c * CELL, r * CELL, CELL, CELL);
+      }
+    }
+
+    // Active piece cells
+    if (activePiece) {
+      const [pr, pg, pb] = hexToRgb(activePiece.color1);
+      // Blend active piece with nearby board cells
+      for (const { r, c } of activePiece.cells) {
         if (r < 0 || r >= GRID || c < 0 || c >= GRID) continue;
-        const x = c * CELL;
-        const y = r * CELL;
 
-        // Per-cell gradient based on distance from piece centre
-        const cellCx = x + CELL / 2;
-        const cellCy = y + CELL / 2;
-        const dx = cellCx - piece.cx;
-        const dy = cellCy - piece.cy;
-        const maxDist = CELL * 2.5;
-        const t = Math.min(1, Math.sqrt(dx*dx + dy*dy) / maxDist);
-        const blended = lerpColor(piece.color1, piece.color2, t);
-
-        ctx.fillStyle = rgbToStr(blended);
-        // Fill slightly oversized to eliminate subpixel gaps
-        ctx.fillRect(x - 0.5, y - 0.5, CELL + 1, CELL + 1);
+        let tR = pr * 2, tG = pg * 2, tB = pb * 2, tW = 2; // self weight
+        for (let dr = -blendRadius; dr <= blendRadius; dr++) {
+          for (let dc = -blendRadius; dc <= blendRadius; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = r + dr, nc = c + dc;
+            if (nr < 0 || nr >= GRID || nc < 0 || nc >= GRID) continue;
+            const nrgb = colorGrid[nr]?.[nc];
+            if (!nrgb) continue;
+            const dist = Math.sqrt(dr * dr + dc * dc);
+            const w = 1 / (1 + dist * 1.2);
+            tR += nrgb[0] * w; tG += nrgb[1] * w; tB += nrgb[2] * w; tW += w;
+          }
+        }
+        colorCtx.fillStyle = rgbStr(
+          Math.round(tR / tW), Math.round(tG / tW), Math.round(tB / tW)
+        );
+        colorCtx.fillRect(c * CELL, r * CELL, CELL, CELL);
       }
     }
   }
@@ -432,43 +506,14 @@
       const next = ghost.map(({ r, c }) => ({ r: r + dr, c: c + dc }));
       let blocked = false;
       for (const { r, c } of next) {
-        if (r < 0 || r >= GRID || c < 0 || c >= GRID || board[r][c]) {
-          blocked = true; break;
-        }
+        if (r < 0 || r >= GRID || c < 0 || c >= GRID || board[r][c]) { blocked = true; break; }
       }
       if (blocked) break;
       ghost = next;
     }
-
-    const rgb = hexToRgb(activePiece.color1);
-    for (const { r, c } of ghost) {
-      ctx.fillStyle = rgbToStr(rgb, 0.15);
-      ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
-    }
-  }
-
-  function drawActivePiece() {
-    if (!activePiece) return;
-    let sumR = 0, sumC = 0;
-    for (const {r, c} of activePiece.cells) { sumR += r; sumC += c; }
-    const pcx = (sumC / activePiece.cells.length + 0.5) * CELL;
-    const pcy = (sumR / activePiece.cells.length + 0.5) * CELL;
-
-    for (const { r, c } of activePiece.cells) {
-      if (r < 0 || r >= GRID || c < 0 || c >= GRID) continue;
-      const x = c * CELL;
-      const y = r * CELL;
-      const cellCx = x + CELL / 2;
-      const cellCy = y + CELL / 2;
-      const dx = cellCx - pcx;
-      const dy = cellCy - pcy;
-      const maxDist = CELL * 2.5;
-      const t = Math.min(1, Math.sqrt(dx*dx + dy*dy) / maxDist);
-      const blended = lerpColor(activePiece.color1, activePiece.color2, t);
-
-      ctx.fillStyle = rgbToStr(blended);
-      ctx.fillRect(x - 0.5, y - 0.5, CELL + 1, CELL + 1);
-    }
+    const [pr, pg, pb] = hexToRgb(activePiece.color1);
+    ctx.fillStyle = rgbStr(pr, pg, pb, 0.12);
+    for (const { r, c } of ghost) ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
   }
 
   function drawDirectionIndicators() {
@@ -485,31 +530,48 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawArrow(x, y, dx, dy, size) {
+  function drawArrow(x, y, dx, dy, s) {
     ctx.beginPath();
     ctx.moveTo(x, y);
-    if (dx === 0) {
-      ctx.lineTo(x - size, y - dy * size * 1.5);
-      ctx.lineTo(x + size, y - dy * size * 1.5);
-    } else {
-      ctx.lineTo(x - dx * size * 1.5, y - size);
-      ctx.lineTo(x - dx * size * 1.5, y + size);
-    }
+    if (dx === 0) { ctx.lineTo(x - s, y - dy * s * 1.5); ctx.lineTo(x + s, y - dy * s * 1.5); }
+    else { ctx.lineTo(x - dx * s * 1.5, y - s); ctx.lineTo(x - dx * s * 1.5, y + s); }
     ctx.closePath();
     ctx.fill();
+  }
+
+  // ── Composite everything ───────────────────────────────────────
+  function render() {
+    // 1. Background
+    drawBg();
+    drawGridLines();
+
+    // 2. Glow halos (additive blend beneath the solid shape)
+    drawGlowPass();
+
+    // 3. Ghost piece
+    drawGhostPiece();
+
+    // 4. Build the color field and rounded mask
+    drawColorField();
+    buildMask();
+
+    // 5. Clip color field by rounded mask → draw to main canvas
+    colorCtx.save();
+    colorCtx.globalCompositeOperation = "destination-in";
+    colorCtx.drawImage(maskCvs, 0, 0);
+    colorCtx.restore();
+
+    ctx.drawImage(colorCvs, 0, 0);
+
+    // 6. Direction arrow
+    drawDirectionIndicators();
   }
 
   // ── Game loop ──────────────────────────────────────────────────
   function loop(time) {
     requestAnimationFrame(loop);
 
-    drawBg();
-    drawGridLines();
-    drawGlowPass();
-    drawBoard();
-    drawGhostPiece();
-    drawActivePiece();
-    drawDirectionIndicators();
+    render();
 
     if (paused || gameOver) return;
 
@@ -522,9 +584,7 @@
     if (time - lastDrop >= dropInterval) {
       lastDrop = time;
       const { dr, dc } = getDelta(activePiece.dir);
-      if (!movePiece(dr, dc)) {
-        lockPiece();
-      }
+      if (!movePiece(dr, dc)) lockPiece();
     }
   }
 
@@ -537,11 +597,11 @@
         case "ArrowRight": e.preventDefault(); moveLateral(1); break;
         case "ArrowDown":
           e.preventDefault();
-          if (activePiece) { const {dr,dc} = getDelta(activePiece.dir); movePiece(dr,dc); }
+          if (activePiece) { const { dr, dc } = getDelta(activePiece.dir); movePiece(dr, dc); }
           break;
         case "ArrowUp":
           e.preventDefault();
-          if (activePiece) { const {dr,dc} = getDelta(activePiece.dir); movePiece(-dr,-dc); }
+          if (activePiece) { const { dr, dc } = getDelta(activePiece.dir); movePiece(-dr, -dc); }
           break;
         case " ":  e.preventDefault(); hardDrop(); break;
         case "z": case "Z": rotatePiece(false); break;
@@ -561,15 +621,13 @@
       ctrl.classList.remove("hidden"); showBtn.classList.remove("visible");
     });
 
-    document.getElementById("speed").addEventListener("input", (e) => {
-      dropInterval = parseInt(e.target.value);
-    });
+    document.getElementById("speed").addEventListener("input", (e) => { dropInterval = parseInt(e.target.value); });
     document.getElementById("grid-size").addEventListener("change", () => resetBoard());
     document.getElementById("palette").addEventListener("change", (e) => { palette = e.target.value; });
     document.getElementById("bg-style").addEventListener("change", (e) => { bgStyle = e.target.value; });
     document.getElementById("tog-grid").addEventListener("change", (e) => { showGrid = e.target.checked; });
     document.getElementById("tog-glow").addEventListener("change", (e) => { showGlow = e.target.checked; });
-    document.getElementById("tog-shadow").addEventListener("change", (e) => { showShadow = e.target.checked; });
+    document.getElementById("tog-shadow").addEventListener("change", (e) => {});
     document.getElementById("tog-auto").addEventListener("change", (e) => { autoPlay = e.target.checked; });
     document.getElementById("btn-pause").addEventListener("click", togglePause);
     document.getElementById("btn-reset").addEventListener("click", resetBoard);
@@ -590,65 +648,40 @@
   }
 
   function exportHighRes() {
+    // Pause rendering, capture at 3x
     const scale = 3;
-    const expCanvas = document.createElement("canvas");
-    const w = GRID * CELL;
-    const h = GRID * CELL;
-    expCanvas.width = w * scale;
-    expCanvas.height = h * scale;
-    const ectx = expCanvas.getContext("2d");
-    ectx.scale(scale, scale);
+    const w = canvas.width, h = canvas.height;
+    const exp = document.createElement("canvas");
+    exp.width = w * scale;
+    exp.height = h * scale;
+    const ec = exp.getContext("2d");
+    ec.scale(scale, scale);
 
     // Background
-    if (bgStyle === "light") {
-      ectx.fillStyle = "#f0f0f0";
-    } else if (bgStyle === "gradient") {
-      const grad = ectx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w * 0.7);
-      grad.addColorStop(0, "#1a1a2e");
-      grad.addColorStop(1, "#0a0a0e");
-      ectx.fillStyle = grad;
-    } else {
-      ectx.fillStyle = "#0a0a0e";
-    }
-    ectx.fillRect(0, 0, w, h);
+    drawBg(ec);
 
-    // Glow pass
-    ectx.save();
-    ectx.globalCompositeOperation = "lighter";
+    // Glow
+    ec.save();
+    ec.globalCompositeOperation = "lighter";
     for (const id in pieceRegistry) {
       const piece = pieceRegistry[id];
-      const bleedRadius = CELL * 3.5;
-      const grad = ectx.createRadialGradient(piece.cx, piece.cy, 0, piece.cx, piece.cy, bleedRadius);
-      const rgb1 = hexToRgb(piece.color1);
-      grad.addColorStop(0, rgbToStr(rgb1, 0.35));
-      grad.addColorStop(0.4, rgbToStr(rgb1, 0.15));
-      grad.addColorStop(1, rgbToStr(rgb1, 0));
-      ectx.fillStyle = grad;
-      ectx.fillRect(piece.cx - bleedRadius, piece.cy - bleedRadius, bleedRadius * 2, bleedRadius * 2);
+      const br = CELL * 4;
+      const [pr, pg, pb] = hexToRgb(piece.color1);
+      const grad = ec.createRadialGradient(piece.cx, piece.cy, 0, piece.cx, piece.cy, br);
+      grad.addColorStop(0, rgbStr(pr, pg, pb, 0.30));
+      grad.addColorStop(0.35, rgbStr(pr, pg, pb, 0.12));
+      grad.addColorStop(1, rgbStr(pr, pg, pb, 0));
+      ec.fillStyle = grad;
+      ec.fillRect(piece.cx - br, piece.cy - br, br * 2, br * 2);
     }
-    ectx.restore();
+    ec.restore();
 
-    // Flat cells
-    for (const id in pieceRegistry) {
-      const piece = pieceRegistry[id];
-      for (const {r, c} of piece.cells) {
-        if (r < 0 || r >= GRID || c < 0 || c >= GRID) continue;
-        const x = c * CELL;
-        const y = r * CELL;
-        const cellCx = x + CELL / 2;
-        const cellCy = y + CELL / 2;
-        const dx = cellCx - piece.cx;
-        const dy = cellCy - piece.cy;
-        const t = Math.min(1, Math.sqrt(dx*dx + dy*dy) / (CELL * 2.5));
-        const blended = lerpColor(piece.color1, piece.color2, t);
-        ectx.fillStyle = rgbToStr(blended);
-        ectx.fillRect(x - 0.5, y - 0.5, CELL + 1, CELL + 1);
-      }
-    }
+    // Draw the already-composited color+mask from the live render
+    ec.drawImage(colorCvs, 0, 0);
 
     const link = document.createElement("a");
     link.download = `tetris-art-hires-${Date.now()}.png`;
-    link.href = expCanvas.toDataURL("image/png");
+    link.href = exp.toDataURL("image/png");
     link.click();
   }
 
