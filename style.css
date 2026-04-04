@@ -315,3 +315,27 @@ select:focus {
 #controls::-webkit-scrollbar { width: 4px; }
 #controls::-webkit-scrollbar-track { background: transparent; }
 #controls::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+/* ── Back link ─────────────────────────────────────────────────── */
+.back-link {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 60;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  transition: background 0.15s, color 0.15s;
+}
+.back-link:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--text);
+}

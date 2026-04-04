@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shape Layer Studio</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <a href="index.html" class="back-link">Home</a>
+
+  <canvas id="game-canvas"></canvas>
+
+  <div id="controls">
+    <div class="ctrl-header">
+      <span class="ctrl-title">Shape Layers</span>
+      <button id="btn-toggle-ctrl" title="Toggle controls">&#x2715;</button>
+    </div>
+    <div class="ctrl-body">
+      <div class="ctrl-section">
+        <label>Grid Spacing</label>
+        <input type="range" id="grid-spacing" min="20" max="80" value="40" step="5" />
+        <div class="range-labels"><span>Dense</span><span>Sparse</span></div>
+      </div>
+      <div class="ctrl-section">
+        <label>Dot Size</label>
+        <input type="range" id="dot-size" min="2" max="8" value="3" />
+        <div class="range-labels"><span>Small</span><span>Large</span></div>
+      </div>
+      <div class="ctrl-section">
+        <label>Color Palette</label>
+        <select id="palette">
+          <option value="bold">Bold</option>
+          <option value="pastel">Pastel</option>
+          <option value="earth">Earth</option>
+          <option value="mono">Mono</option>
+          <option value="neon">Neon</option>
+        </select>
+      </div>
+      <div class="ctrl-section">
+        <label>Background</label>
+        <select id="bg-style">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </div>
+      <div class="ctrl-section">
+        <label id="layer-count">Layers: 0</label>
+      </div>
+      <div class="ctrl-section ctrl-buttons">
+        <button class="btn" id="btn-undo">Undo Point</button>
+        <button class="btn" id="btn-cancel">Cancel Shape</button>
+      </div>
+      <div class="ctrl-section ctrl-buttons">
+        <button class="btn" id="btn-undo-layer">Undo Layer</button>
+        <button class="btn" id="btn-clear">Clear All</button>
+      </div>
+      <div class="ctrl-section ctrl-buttons">
+        <button class="btn btn-accent" id="btn-screenshot">Screenshot</button>
+        <button class="btn btn-accent" id="btn-export">Export Art</button>
+      </div>
+      <div class="ctrl-section keys-info">
+        <p><b>Click</b> grid dots to place points. <b>Close</b> a shape by clicking the first dot again. Shapes layer on top of each other.</p>
+        <p style="margin-top:6px"><b>Escape</b> to cancel, <b>Ctrl+Z</b> to undo</p>
+      </div>
+    </div>
+  </div>
+
+  <button id="btn-show-ctrl" class="hidden" title="Show controls">&#x2630;</button>
+
+  <script src="shapes.js"></script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Four-Way Tetris Art Engine</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <a href="index.html" class="back-link">Home</a>
+
+  <canvas id="game-canvas"></canvas>
+
+  <div id="hud">
+    <div id="direction-indicator">
+      <div class="dir-arrow dir-top" id="arrow-top"></div>
+      <div class="dir-arrow dir-right" id="arrow-right"></div>
+      <div class="dir-arrow dir-bottom" id="arrow-bottom"></div>
+      <div class="dir-arrow dir-left" id="arrow-left"></div>
+      <div class="dir-center"></div>
+    </div>
+    <div id="turn-label">TOP</div>
+  </div>
+
+  <div id="controls">
+    <div class="ctrl-header">
+      <span class="ctrl-title">Four-Way Tetris</span>
+      <button id="btn-toggle-ctrl" title="Toggle controls">&#x2715;</button>
+    </div>
+    <div class="ctrl-body">
+      <div class="ctrl-section">
+        <label>Speed</label>
+        <input type="range" id="speed" min="50" max="800" value="400" />
+        <div class="range-labels"><span>Fast</span><span>Slow</span></div>
+      </div>
+      <div class="ctrl-section">
+        <label>Grid Size</label>
+        <input type="range" id="grid-size" min="20" max="60" value="36" step="2" />
+        <div class="range-labels"><span>Small</span><span>Large</span></div>
+      </div>
+      <div class="ctrl-section">
+        <label>Color Palette</label>
+        <select id="palette">
+          <option value="neon">Neon</option>
+          <option value="pastel">Pastel</option>
+          <option value="earth">Earth</option>
+          <option value="mono">Mono</option>
+          <option value="sunset">Sunset</option>
+          <option value="ocean">Ocean</option>
+        </select>
+      </div>
+      <div class="ctrl-section">
+        <label>Background</label>
+        <select id="bg-style">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+          <option value="gradient">Gradient</option>
+        </select>
+      </div>
+      <div class="ctrl-section toggle-row">
+        <label class="toggle-label"><input type="checkbox" id="tog-grid" /><span>Grid Lines</span></label>
+        <label class="toggle-label"><input type="checkbox" id="tog-glow" checked /><span>Glow</span></label>
+        <label class="toggle-label"><input type="checkbox" id="tog-shadow" checked /><span>Shadows</span></label>
+        <label class="toggle-label"><input type="checkbox" id="tog-auto" checked /><span>Auto Play</span></label>
+      </div>
+      <div class="ctrl-section ctrl-buttons">
+        <button class="btn" id="btn-pause">Pause</button>
+        <button class="btn" id="btn-reset">Reset</button>
+      </div>
+      <div class="ctrl-section ctrl-buttons">
+        <button class="btn btn-accent" id="btn-screenshot">Screenshot</button>
+        <button class="btn btn-accent" id="btn-export">Export Art</button>
+      </div>
+      <div class="ctrl-section keys-info">
+        <p><b>Controls:</b> Arrow keys to move, Z/X to rotate, Space to drop, Enter for next turn</p>
+      </div>
+    </div>
+  </div>
+
+  <button id="btn-show-ctrl" class="hidden" title="Show controls">&#x2630;</button>
+
+  <script src="game.js"></script>
+</body>
+</html>
