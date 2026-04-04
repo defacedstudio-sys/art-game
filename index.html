@@ -3,80 +3,252 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Four-Way Tetris Art Engine</title>
-  <link rel="stylesheet" href="style.css" />
+  <title>Art Game Studio</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0e;
+      --card-bg: rgba(255,255,255,0.04);
+      --card-border: rgba(255,255,255,0.08);
+      --text: #e8e8ec;
+      --text-muted: #888;
+      --accent: #7c6ef0;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    .home {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 48px;
+    }
+
+    .home-title {
+      font-size: 1.6rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      color: var(--text-muted);
+    }
+
+    .home-title span {
+      color: var(--accent);
+    }
+
+    .game-grid {
+      display: flex;
+      gap: 32px;
+      flex-wrap: wrap;
+      justify-content: center;
+      padding: 0 24px;
+    }
+
+    .game-card {
+      width: 320px;
+      border-radius: 18px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.2s, border-color 0.3s, box-shadow 0.3s;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .game-card:hover {
+      transform: translateY(-6px);
+      border-color: rgba(124, 110, 240, 0.4);
+      box-shadow: 0 12px 40px rgba(124, 110, 240, 0.15);
+    }
+
+    .card-preview {
+      width: 100%;
+      height: 200px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-preview canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    .card-body {
+      padding: 20px;
+    }
+
+    .card-body h2 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .card-body p {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .card-tag {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 3px 10px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-radius: 20px;
+      background: rgba(124, 110, 240, 0.15);
+      border: 1px solid rgba(124, 110, 240, 0.3);
+      color: #b0a4ff;
+    }
+  </style>
 </head>
 <body>
-  <canvas id="game-canvas"></canvas>
 
-  <div id="hud">
-    <div id="direction-indicator">
-      <div class="dir-arrow dir-top" id="arrow-top"></div>
-      <div class="dir-arrow dir-right" id="arrow-right"></div>
-      <div class="dir-arrow dir-bottom" id="arrow-bottom"></div>
-      <div class="dir-arrow dir-left" id="arrow-left"></div>
-      <div class="dir-center"></div>
-    </div>
-    <div id="turn-label">TOP</div>
-  </div>
+  <div class="home">
+    <h1 class="home-title">Art <span>Game</span> Studio</h1>
 
-  <div id="controls">
-    <div class="ctrl-header">
-      <span class="ctrl-title">Four-Way Tetris</span>
-      <button id="btn-toggle-ctrl" title="Toggle controls">&#x2715;</button>
-    </div>
-    <div class="ctrl-body">
-      <div class="ctrl-section">
-        <label>Speed</label>
-        <input type="range" id="speed" min="50" max="800" value="400" />
-        <div class="range-labels"><span>Fast</span><span>Slow</span></div>
-      </div>
-      <div class="ctrl-section">
-        <label>Grid Size</label>
-        <input type="range" id="grid-size" min="20" max="60" value="36" step="2" />
-        <div class="range-labels"><span>Small</span><span>Large</span></div>
-      </div>
-      <div class="ctrl-section">
-        <label>Color Palette</label>
-        <select id="palette">
-          <option value="neon">Neon</option>
-          <option value="pastel">Pastel</option>
-          <option value="earth">Earth</option>
-          <option value="mono">Mono</option>
-          <option value="sunset">Sunset</option>
-          <option value="ocean">Ocean</option>
-        </select>
-      </div>
-      <div class="ctrl-section">
-        <label>Background</label>
-        <select id="bg-style">
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="gradient">Gradient</option>
-        </select>
-      </div>
-      <div class="ctrl-section toggle-row">
-        <label class="toggle-label"><input type="checkbox" id="tog-grid" /><span>Grid Lines</span></label>
-        <label class="toggle-label"><input type="checkbox" id="tog-glow" checked /><span>Glow</span></label>
-        <label class="toggle-label"><input type="checkbox" id="tog-shadow" checked /><span>Shadows</span></label>
-        <label class="toggle-label"><input type="checkbox" id="tog-auto" checked /><span>Auto Play</span></label>
-      </div>
-      <div class="ctrl-section ctrl-buttons">
-        <button class="btn" id="btn-pause">Pause</button>
-        <button class="btn" id="btn-reset">Reset</button>
-      </div>
-      <div class="ctrl-section ctrl-buttons">
-        <button class="btn btn-accent" id="btn-screenshot">Screenshot</button>
-        <button class="btn btn-accent" id="btn-export">Export Art</button>
-      </div>
-      <div class="ctrl-section keys-info">
-        <p><b>Controls:</b> Arrow keys to move, Z/X to rotate, Space to drop, Enter for next turn</p>
-      </div>
+    <div class="game-grid">
+      <a class="game-card" href="tetris.html">
+        <div class="card-preview" id="preview-tetris"></div>
+        <div class="card-body">
+          <h2>Four-Way Tetris</h2>
+          <p>Blocks fall from all four sides, clustering around a centre seed. Shapes merge with bleeding gradients and rounded edges.</p>
+          <span class="card-tag">Generative</span>
+        </div>
+      </a>
+
+      <a class="game-card" href="shapes.html">
+        <div class="card-preview" id="preview-shapes"></div>
+        <div class="card-body">
+          <h2>Shape Layer Studio</h2>
+          <p>Click grid intersections to draw connected shapes. Close a path to fill it with colour, then layer new shapes on top.</p>
+          <span class="card-tag">Interactive</span>
+        </div>
+      </a>
     </div>
   </div>
 
-  <button id="btn-show-ctrl" class="hidden" title="Show controls">&#x2630;</button>
+  <script>
+    // Animated preview for Tetris card
+    (() => {
+      const container = document.getElementById("preview-tetris");
+      const cvs = document.createElement("canvas");
+      cvs.width = 320; cvs.height = 200;
+      container.appendChild(cvs);
+      const ctx = cvs.getContext("2d");
+      const colors = ["#ff006e","#fb5607","#ffbe0b","#06d6a0","#118ab2","#8338ec","#ff69b4"];
+      const blocks = [];
+      function addBlock() {
+        blocks.push({
+          x: Math.random() * 280 + 20,
+          y: -20,
+          w: 12 + Math.random() * 20,
+          h: 12 + Math.random() * 20,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          vy: 0.4 + Math.random() * 0.8,
+          dir: Math.floor(Math.random() * 4),
+        });
+      }
+      for (let i = 0; i < 15; i++) {
+        const b = { x: Math.random()*280+20, y: Math.random()*180+10, w:12+Math.random()*20, h:12+Math.random()*20,
+          color: colors[Math.floor(Math.random()*colors.length)], vy:0, dir:0 };
+        blocks.push(b);
+      }
+      let frame = 0;
+      function draw() {
+        requestAnimationFrame(draw);
+        ctx.fillStyle = "#0a0a0e";
+        ctx.fillRect(0,0,320,200);
+        if (frame++ % 60 === 0 && blocks.length < 40) addBlock();
+        for (const b of blocks) {
+          b.y += b.vy;
+          ctx.globalAlpha = 0.15;
+          ctx.fillStyle = b.color;
+          ctx.beginPath();
+          ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w * 1.5, 0, Math.PI*2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = b.color;
+          const r = 4;
+          ctx.beginPath();
+          ctx.moveTo(b.x + r, b.y);
+          ctx.arcTo(b.x+b.w, b.y, b.x+b.w, b.y+b.h, r);
+          ctx.arcTo(b.x+b.w, b.y+b.h, b.x, b.y+b.h, r);
+          ctx.arcTo(b.x, b.y+b.h, b.x, b.y, r);
+          ctx.arcTo(b.x, b.y, b.x+b.w, b.y, r);
+          ctx.fill();
+          if (b.y > 200) { b.y = -20; b.x = Math.random()*280+20; }
+        }
+      }
+      draw();
+    })();
 
-  <script src="game.js"></script>
+    // Animated preview for Shapes card
+    (() => {
+      const container = document.getElementById("preview-shapes");
+      const cvs = document.createElement("canvas");
+      cvs.width = 320; cvs.height = 200;
+      container.appendChild(cvs);
+      const ctx = cvs.getContext("2d");
+      const colors = ["#ff006e","#06d6a0","#ffbe0b","#8338ec","#118ab2","#fb5607"];
+      const shapes = [
+        { pts: [[80,40],[160,30],[180,100],[100,120]], color: colors[0] },
+        { pts: [[140,60],[240,50],[260,140],[180,150],[150,100]], color: colors[1] },
+        { pts: [[40,100],[120,90],[130,170],[60,180]], color: colors[3] },
+        { pts: [[200,100],[280,110],[270,180],[190,170]], color: colors[2] },
+      ];
+      const gridSp = 20;
+      let pulse = 0;
+      function draw() {
+        requestAnimationFrame(draw);
+        pulse += 0.02;
+        ctx.fillStyle = "#0a0a0e";
+        ctx.fillRect(0,0,320,200);
+        // Grid dots
+        ctx.fillStyle = "rgba(255,255,255,0.08)";
+        for (let x = 10; x < 320; x += gridSp)
+          for (let y = 10; y < 200; y += gridSp)
+            ctx.fillRect(x-1, y-1, 2, 2);
+        // Shapes
+        for (let i = 0; i < shapes.length; i++) {
+          const s = shapes[i];
+          ctx.globalAlpha = 0.6 + Math.sin(pulse + i) * 0.15;
+          ctx.fillStyle = s.color;
+          ctx.beginPath();
+          ctx.moveTo(s.pts[0][0], s.pts[0][1]);
+          for (let j = 1; j < s.pts.length; j++) ctx.lineTo(s.pts[j][0], s.pts[j][1]);
+          ctx.closePath();
+          ctx.fill();
+          ctx.globalAlpha = 0.8;
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+        // Dots on vertices
+        ctx.globalAlpha = 1;
+        for (const s of shapes) {
+          for (const [x,y] of s.pts) {
+            ctx.fillStyle = "#fff";
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI*2);
+            ctx.fill();
+          }
+        }
+      }
+      draw();
+    })();
+  </script>
 </body>
 </html>
