@@ -510,7 +510,9 @@
 
   // Draw an object/creature — ONLY if its real art is loaded. Houndmares,
   // lazeey (sloths) and ordamancers animate by cycling their sprite-sheet
-  // frames; a per-cell phase keeps them out of lockstep.
+  // frames; a per-cell phase keeps them out of lockstep. Sprites keep their
+  // native pixel dimensions (scaled to the zoom — tiles are 20px), so larger
+  // creatures stay big and uncompressed, anchored to the cell's bottom-centre.
   function drawSprite(map, gid, x, y, px, t, wx, wy) {
     const info = lookupGid(map, gid, false);   // creatures: real art only
     if (!info || !info.img) return;
@@ -526,10 +528,10 @@
     }
     const sx = (frame % info.cols) * info.tw;
     const sy = Math.floor(frame / info.cols) * info.th;
-    // Preserve aspect; anchor to the cell's bottom so tall sprites stand up.
-    const w = Math.ceil(px);
-    const h = Math.ceil(px * (info.th / info.tw));
-    ctx.drawImage(info.img, sx, sy, info.tw, info.th, x, y + px - h, w, h);
+    const scale = px / 20;                      // world scale (native tile = 20px)
+    const w = Math.ceil(info.tw * scale);
+    const h = Math.ceil(info.th * scale);
+    ctx.drawImage(info.img, sx, sy, info.tw, info.th, x + (px - w) / 2, y + px - h, w, h);
   }
 
   // ── Unified world ────────────────────────────────────────────────
@@ -571,19 +573,17 @@
   }
 
   // Memory glitch helpers. Memory tears the world: white "void" patches
-  // open up and rows of tiles slip sideways / corrupt.
-  function memVoid(wx, wy, t) {
+  // open up and rows of tiles slip sideways. These are STATIC — fixed by
+  // world position and the memory amount, they do not animate.
+  function memVoid(wx, wy) {
     const m = dials.memory;
     if (m <= 0) return false;
-    const tq = Math.floor(t / 110);                     // glitch time step
-    // Blocky drifting patches go pure white (the void).
-    return hash(Math.floor(wx / 2) + tq * 3, Math.floor(wy / 2) - tq, 71) < m * 0.4;
+    return hash(Math.floor(wx / 2), Math.floor(wy / 2), 71) < m * 0.4;
   }
-  function memShift(wy, t, px) {
+  function memShift(wy, px) {
     const m = dials.memory;
     if (m <= 0) return 0;
-    const tq = Math.floor(t / 90);
-    if (hash(wy, tq, 73) < m * 0.45) return (hash(wy, tq, 9) - 0.5) * px * 7;
+    if (hash(wy, 0, 73) < m * 0.45) return (hash(wy, 0, 9) - 0.5) * px * 7;
     return 0;
   }
 
@@ -605,13 +605,13 @@
 
     // Terrain pass — biome chosen per cell, so regions border & blend.
     for (let j = -1; j < down; j++) {
-      const sliceShift = memShift(oy + j, t, px);
+      const sliceShift = memShift(oy + j, px);
       for (let i = -1; i <= across; i++) {
         const wx = ox + i, wy = oy + j;
         const sx = i * px - fx + sliceShift, sy = j * px - fy;
 
         // Memory: white void patches eat the world.
-        if (memVoid(wx, wy, t)) { ctx.fillStyle = "#fff"; ctx.fillRect(sx, sy, cp, cp); continue; }
+        if (memVoid(wx, wy)) { ctx.fillStyle = "#fff"; ctx.fillRect(sx, sy, cp, cp); continue; }
 
         const map = pickMap(wx, wy);
         let gid = terrainGid(map, wx, wy);
@@ -635,41 +635,75 @@
       }
     }
 
-    // Object + creature pass (real art only).
+    // Object pass — decorations only (trees, logs, plants, flowers…). The
+    // map-placed creatures are skipped here and handled by the capped
+    // creature system below.
+    const isLog = (cat) => cat === "soil" || cat === "earth";
+    for (let j = -1; j < down; j++) {
+      const sliceShift = memShift(oy + j, px);
+      for (let i = -1; i <= across; i++) {
+        const wx = ox + i, wy = oy + j;
+        const sx = i * px - fx + sliceShift, sy = j * px - fy;
+        if (memVoid(wx, wy)) continue;
+        const map = pickMap(wx, wy);
+        const lx = ((wx % map.W) + map.W) % map.W;
+        const ly = ((wy % map.H) + map.H) % map.H;
+        for (const g of objectsAt(map, lx, ly)) {
+          if (isCreatureGid(map, g)) continue;               // creatures handled below
+          drawSprite(map, g, sx, sy, px, t, wx, wy);
+        }
+      }
+    }
+
+    // Creature pass — at most 4 on screen, never on water / trees / logs.
     const chaos = Math.max(0, (dials.order - 0.5) * 2);
     const order = Math.max(0, (0.5 - dials.order) * 2);
     const relaxed = 1 - dials.fear;
     const houndP = (chaos * 0.5 + dials.fear * 0.6) * 0.18;   // fearful + chaotic
     const slothP = (chaos * 0.5 + relaxed * 0.5) * 0.14;      // chaotic + relaxed
     const ordaP = order * 0.16;                               // orderly
+    const candidates = [];
     for (let j = -1; j < down; j++) {
-      const sliceShift = memShift(oy + j, t, px);
+      const sliceShift = memShift(oy + j, px);
       for (let i = -1; i <= across; i++) {
         const wx = ox + i, wy = oy + j;
-        const sx = i * px - fx + sliceShift, sy = j * px - fy;
-        if (memVoid(wx, wy, t)) continue;                     // nothing lives in the void
+        if (memVoid(wx, wy)) continue;
         const map = pickMap(wx, wy);
         const lx = ((wx % map.W) + map.W) % map.W;
         const ly = ((wy % map.H) + map.H) % map.H;
 
-        for (const g of objectsAt(map, lx, ly))
-          drawSprite(map, g, sx, sy, px, t, wx, wy);
-
-        // Houndmares haunt the fearful/chaotic side; sloths laze on the
-        // relaxed/chaotic side; ordamancers keep order on the orderly side.
-        if (hash(wx, wy, 53) < houndP) {
-          const c = findCreatureGid("houndmare");
-          if (c) drawSprite(c.map, c.gid, sx, sy, px, t, wx, wy);
-        } else if (hash(wx, wy, 59) < slothP) {
-          const c = findCreatureGid("lazeey");
-          if (c) drawSprite(c.map, c.gid, sx, sy, px, t, wx, wy);
-        } else if (hash(wx, wy, 67) < ordaP) {
-          const c = findByName("ordamancer");
-          if (c) drawSprite(c.map, c.gid, sx, sy, px, t, wx, wy);
+        // No creatures on trees / logs / other objects.
+        let blocked = false;
+        for (const g of objectsAt(map, lx, ly)) {
+          if (!isCreatureGid(map, g)) { blocked = true; break; }
         }
+        if (blocked) continue;
+        // No creatures on water (or watery soil/log tiles).
+        const tinfo = lookupGid(map, terrainGid(map, wx, wy));
+        const cat = tinfo ? tinfo.category : "generic";
+        if (cat === "water" || isLog(cat)) continue;
+
+        let type = null;
+        if (hash(wx, wy, 53) < houndP) type = "houndmare";
+        else if (hash(wx, wy, 59) < slothP) type = "lazeey";
+        else if (hash(wx, wy, 67) < ordaP) type = "ordamancer";
+        if (!type) continue;
+        candidates.push({ sx: i * px - fx + sliceShift, sy: j * px - fy, wx, wy, type, score: hash(wx, wy, 99) });
       }
     }
+    candidates.sort((a, b) => a.score - b.score);
+    for (const c of candidates.slice(0, 4)) {
+      const found = c.type === "ordamancer" ? findByName("ordamancer") : findCreatureGid(c.type);
+      if (found) drawSprite(found.map, found.gid, c.sx, c.sy, px, t, c.wx, c.wy);
+    }
     ctx.globalAlpha = 1;
+  }
+
+  // Is this gid an animated creature (houndmare / lazeey / ordamancer)?
+  function isCreatureGid(map, gid) {
+    const info = lookupGid(map, gid, false);
+    if (!info) return false;
+    return ANIM_RE.test((info.ts.name || info.ts.tsxKey || "").toLowerCase());
   }
 
   let purpleCache;
