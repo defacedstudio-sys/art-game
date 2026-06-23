@@ -429,28 +429,29 @@
   }
 
   // Compute the tint signature for a tile. Kept independent of per-cell
-  // coordinates (apart from a 3-step "tone band") so the tinted-tile cache
-  // stays tiny: at most a few distinct tiles × 3 bands × a couple of states.
-  //   band: 0/1/2 selects a hue-mixing offset for Imaginative tone variety.
+  // coordinates (apart from a 5-step "tone band") so the tinted-tile cache
+  // stays small. Imaginative spreads tiles across many vivid hue variants.
   function tintSig(category, band, t) {
     const imag = dials.imag, fear = dials.fear;
     let hue = 0;
-    let sat = lerp(100, 62, imag);            // pastel: lower saturation
-    let bri = lerp(100, 122, imag);           // pastel: brighter
-    if (imag > 0) hue += imag * 25 + (band - 1) * imag * 30;
+    let sat = lerp(100, 90, imag);            // keep colours punchy, not washed
+    let bri = lerp(100, 116, imag);
+    if (imag > 0) {
+      hue += (band - 2) * imag * 58 + imag * 12;   // wide hue spread per band
+      if (band % 2) sat = lerp(sat, 135, imag * 0.5); // some bands extra vivid
+    }
     if (fear > 0) {
       if (category === "water") { hue += -70 * fear; sat = lerp(sat, sat + 25, fear); }
-      else { hue += 18 * fear; sat = lerp(sat, sat * 0.92, fear); }
+      else { hue += 18 * fear; }
     }
-    // Global breathing (time only) gives the Memory dial trails to gather.
-    hue += Math.sin(t * 0.0006) * dials.memory * 10;
     return {
       h: Math.round(hue / 6) * 6,
       s: Math.round(sat / 5) * 5,
       b: Math.round(bri / 4) * 4,
     };
   }
-  const toneBand = (wx, wy) => (dials.imag > 0 ? (hash(wx, wy, 7) * 3) | 0 : 1);
+  const TONE_BANDS = 5;
+  const toneBand = (wx, wy) => (dials.imag > 0 ? (hash(wx, wy, 7) * TONE_BANDS) | 0 : 2);
 
   // ── Fallback colour block when a tile has no loaded art ──────────
   function fallbackBlock(category, wx, wy, x, y, px, t) {
@@ -490,6 +491,20 @@
     return null;
   }
 
+  // Find a loaded tileset whose name contains a substring (e.g. "ordamancer").
+  function findByName(sub) {
+    for (const mName in maps) {
+      const m = maps[mName];
+      for (const ts of m.tilesets) {
+        const nm = (ts.name || ts.tsxKey || "").toLowerCase();
+        if (!nm.includes(sub)) continue;
+        const probe = lookupGid(m, ts.firstgid, false);
+        if (probe && probe.img) return { map: m, gid: ts.firstgid };
+      }
+    }
+    return null;
+  }
+
   // Draw an object/creature — ONLY if its real art is loaded. No
   // placeholder blobs, no bouncing: if the sprite isn't available, the
   // tile simply isn't drawn.
@@ -505,34 +520,66 @@
   }
 
   // ── Unified world ────────────────────────────────────────────────
-  // All loaded maps are one world. Each cell belongs to a biome (a source
-  // map); the Order↔Chaos dial decides whether biomes sit in clean
-  // contiguous regions (order) or intermix tile-by-tile (chaos) — that
-  // intermixing IS the biomes interacting.
-  let MAPS = [];
-  function refreshMapList() { MAPS = Object.values(maps); }
+  // All loaded maps are one world. Order↔Chaos decides whether biomes sit
+  // in clean contiguous regions (order) or intermix tile-by-tile (chaos).
+  // Relaxed↔Fear decides WHICH biome dominates: relaxed→beach(sand),
+  // middle→grass & trees, fear→purple. Imaginative+chaos brings in dream.
+  let MAPS = [], MAP_NAMES = [];
+  function refreshMapList() { MAPS = Object.values(maps); MAP_NAMES = Object.keys(maps); }
+
+  // Per-biome selection weight from the dials.
+  function biomeWeights() {
+    const f = dials.fear, imag = dials.imag;
+    const chaos = Math.max(0, (dials.order - 0.5) * 2);
+    const w = {};
+    for (const n of MAP_NAMES) w[n] = 0.12;                 // small baseline
+    if ("sand" in w)        w["sand"]        = 0.05 + Math.max(0, 1 - 2 * f);     // relaxed → beach
+    if ("grass farm" in w)  w["grass farm"]  = 0.1 + (1 - 2 * Math.abs(f - 0.5)); // middle → grass+trees
+    if ("purple" in w)      w["purple"]      = 0.05 + Math.max(0, 2 * f - 1);     // fear → purple
+    if ("unconscious" in w) w["unconscious"] = imag * (0.25 + chaos);            // imaginative+chaotic → dream
+    return w;
+  }
 
   function pickMap(wx, wy) {
     if (MAPS.length <= 1) return MAPS[0];
     const order = Math.max(0, (0.5 - dials.order) * 2);
     const chaos = Math.max(0, (dials.order - 0.5) * 2);
-    // Region size grows with order → larger, cleaner biome patches.
-    const bs = Math.max(3, Math.round(7 + order * 38));
+    const bs = Math.max(3, Math.round(7 + order * 38));     // order → larger patches
     const bx = Math.floor(wx / bs), by = Math.floor(wy / bs);
-    let idx = (hash(bx, by, 101) * MAPS.length) | 0;       // contiguous region
-    if (chaos > 0 && hash(wx, wy, 107) < chaos)
-      idx = (hash(wx, wy, 103) * MAPS.length) | 0;         // intermix per tile
-    return MAPS[idx];
+    let r = hash(bx, by, 101);                              // contiguous region
+    if (chaos > 0 && hash(wx, wy, 107) < chaos) r = hash(wx, wy, 103); // intermix
+    // Weighted pick.
+    const w = biomeWeights();
+    let tot = 0; for (const n of MAP_NAMES) tot += w[n];
+    if (tot <= 0) return MAPS[0];
+    let x = r * tot;
+    for (const n of MAP_NAMES) { x -= w[n]; if (x <= 0) return maps[n]; }
+    return maps[MAP_NAMES[MAP_NAMES.length - 1]];
+  }
+
+  // Memory glitch helpers. Memory tears the world: white "void" patches
+  // open up and rows of tiles slip sideways / corrupt.
+  function memVoid(wx, wy, t) {
+    const m = dials.memory;
+    if (m <= 0) return false;
+    const tq = Math.floor(t / 110);                     // glitch time step
+    // Blocky drifting patches go pure white (the void).
+    return hash(Math.floor(wx / 2) + tq * 3, Math.floor(wy / 2) - tq, 71) < m * 0.4;
+  }
+  function memShift(wy, t, px) {
+    const m = dials.memory;
+    if (m <= 0) return 0;
+    const tq = Math.floor(t / 90);
+    if (hash(wy, tq, 73) < m * 0.45) return (hash(wy, tq, 9) - 0.5) * px * 7;
+    return 0;
   }
 
   // ── Render ───────────────────────────────────────────────────────
   function render(t) {
     if (!MAPS.length) return;
 
-    // Memory: partial clear leaves dreamy afterimages.
-    const clearA = lerp(1, 0.10, dials.memory);
     ctx.globalAlpha = 1;
-    ctx.fillStyle = `rgba(12,12,18,${clearA})`;
+    ctx.fillStyle = "#0c0c12";
     ctx.fillRect(0, 0, 320, 180);
 
     const across = dials.zoom;
@@ -540,31 +587,35 @@
     const down = Math.ceil(180 / px) + 1;
     const ox = Math.floor(camX), oy = Math.floor(camY);
     const fx = (camX - ox) * px, fy = (camY - oy) * px;
-    const tileAlpha = lerp(1, 0.62, dials.memory);
     const purple = findPurpleGid();
+    const cp = Math.ceil(px);
 
     // Terrain pass — biome chosen per cell, so regions border & blend.
     for (let j = -1; j < down; j++) {
+      const sliceShift = memShift(oy + j, t, px);
       for (let i = -1; i <= across; i++) {
         const wx = ox + i, wy = oy + j;
-        const sx = i * px - fx, sy = j * px - fy;
+        const sx = i * px - fx + sliceShift, sy = j * px - fy;
+
+        // Memory: white void patches eat the world.
+        if (memVoid(wx, wy, t)) { ctx.fillStyle = "#fff"; ctx.fillRect(sx, sy, cp, cp); continue; }
 
         const map = pickMap(wx, wy);
         let gid = terrainGid(map, wx, wy);
         let info = lookupGid(map, gid);
         let category = info ? info.category : "generic";
 
-        // Fear: purple creep spreads across every biome.
-        if (dials.fear > 0 && category !== "purple" &&
-            hash(wx, wy, 91) < dials.fear * 0.4) {
+        // Fear: extra purple creep, but only past the middle so the grassy
+        // centre stays clean.
+        const creep = Math.max(0, dials.fear - 0.5) * 0.7;
+        if (creep > 0 && category !== "purple" && hash(wx, wy, 91) < creep) {
           category = "purple";
           if (purple) info = lookupGid(purple.map, purple.gid);
         }
 
-        ctx.globalAlpha = tileAlpha;
         if (info && info.img) {
           const sig = tintSig(category, toneBand(wx, wy), t);
-          ctx.drawImage(tintedTile(info, sig), sx, sy, Math.ceil(px), Math.ceil(px));
+          ctx.drawImage(tintedTile(info, sig), sx, sy, cp, cp);
         } else {
           fallbackBlock(category, wx, wy, sx, sy, px, t);
         }
@@ -572,11 +623,18 @@
     }
 
     // Object + creature pass (real art only).
-    ctx.globalAlpha = tileAlpha;
+    const chaos = Math.max(0, (dials.order - 0.5) * 2);
+    const order = Math.max(0, (0.5 - dials.order) * 2);
+    const relaxed = 1 - dials.fear;
+    const houndP = (chaos * 0.5 + dials.fear * 0.6) * 0.18;   // fearful + chaotic
+    const slothP = (chaos * 0.5 + relaxed * 0.5) * 0.14;      // chaotic + relaxed
+    const ordaP = order * 0.16;                               // orderly
     for (let j = -1; j < down; j++) {
+      const sliceShift = memShift(oy + j, t, px);
       for (let i = -1; i <= across; i++) {
         const wx = ox + i, wy = oy + j;
-        const sx = i * px - fx, sy = j * px - fy;
+        const sx = i * px - fx + sliceShift, sy = j * px - fy;
+        if (memVoid(wx, wy, t)) continue;                     // nothing lives in the void
         const map = pickMap(wx, wy);
         const lx = ((wx % map.W) + map.W) % map.W;
         const ly = ((wy % map.H) + map.H) % map.H;
@@ -584,10 +642,16 @@
         for (const g of objectsAt(map, lx, ly))
           drawSprite(map, g, sx, sy, px);
 
-        // Fear: more houndmares & lazeey bom inhabit the whole world.
-        if (dials.fear > 0.05 && hash(wx, wy, 53) < dials.fear * 0.16) {
-          const want = hash(wx, wy, 61) < 0.5 ? "houndmare" : "lazeey";
-          const c = findCreatureGid(want);
+        // Houndmares haunt the fearful/chaotic side; sloths laze on the
+        // relaxed/chaotic side; ordamancers keep order on the orderly side.
+        if (hash(wx, wy, 53) < houndP) {
+          const c = findCreatureGid("houndmare");
+          if (c) drawSprite(c.map, c.gid, sx, sy, px);
+        } else if (hash(wx, wy, 59) < slothP) {
+          const c = findCreatureGid("lazeey");
+          if (c) drawSprite(c.map, c.gid, sx, sy, px);
+        } else if (hash(wx, wy, 67) < ordaP) {
+          const c = findByName("ordamancer");
           if (c) drawSprite(c.map, c.gid, sx, sy, px);
         }
       }
