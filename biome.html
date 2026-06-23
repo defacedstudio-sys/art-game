@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Biome Adjuster · Art Game Studio</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0e;
+      --panel: rgba(255,255,255,0.04);
+      --border: rgba(255,255,255,0.09);
+      --text: #e8e8ec;
+      --muted: #888;
+      --accent: #7c6ef0;
+    }
+    html, body {
+      height: 100%;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+    .wrap {
+      display: flex;
+      height: 100%;
+    }
+
+    /* ── Stage ──────────────────────────────────────── */
+    .stage {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      position: relative;
+      padding: 24px;
+      min-width: 0;
+    }
+    #dropzone {
+      position: relative;
+      border: 2px dashed transparent;
+      border-radius: 14px;
+      padding: 10px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    #dropzone.hover {
+      border-color: var(--accent);
+      background: rgba(124,110,240,0.08);
+    }
+    #biome-canvas {
+      width: min(86vw, 960px);
+      height: auto;
+      aspect-ratio: 320 / 180;
+      image-rendering: pixelated;
+      border-radius: 8px;
+      background: #0c0c12;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.6);
+      cursor: grab;
+      touch-action: none;
+    }
+    #biome-canvas:active { cursor: grabbing; }
+
+    .map-tabs { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+    .tab {
+      padding: 6px 14px;
+      font-size: 0.78rem;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--muted);
+      cursor: pointer;
+      text-transform: capitalize;
+      transition: all 0.2s;
+    }
+    .tab:hover { color: var(--text); border-color: rgba(124,110,240,0.4); }
+    .tab.active {
+      color: #fff;
+      background: rgba(124,110,240,0.2);
+      border-color: rgba(124,110,240,0.55);
+    }
+
+    #missing {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-align: center;
+      max-width: 720px;
+      line-height: 1.7;
+    }
+    #missing code {
+      background: rgba(255,255,255,0.06);
+      padding: 1px 6px;
+      border-radius: 5px;
+      font-size: 0.68rem;
+    }
+    #missing .ok { color: #5fd28b; }
+    #missing .warn { color: #e0b15f; }
+
+    .stage-actions { display: flex; gap: 10px; }
+    .btn {
+      padding: 7px 16px;
+      font-size: 0.78rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn:hover { border-color: rgba(124,110,240,0.5); background: rgba(124,110,240,0.12); }
+
+    /* ── Control panel ──────────────────────────────── */
+    .panel {
+      width: 340px;
+      flex-shrink: 0;
+      background: rgba(255,255,255,0.02);
+      border-left: 1px solid var(--border);
+      padding: 28px 26px;
+      overflow-y: auto;
+    }
+    .panel h1 {
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+    }
+    .panel h1 span { color: var(--accent); }
+    .panel .sub {
+      font-size: 0.74rem;
+      color: var(--muted);
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+    .back {
+      display: inline-block;
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-decoration: none;
+      margin-bottom: 18px;
+    }
+    .back:hover { color: var(--accent); }
+
+    .dial { margin-bottom: 22px; }
+    .dial-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+    .dial-head label {
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .dial-head .val {
+      font-size: 0.72rem;
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+    }
+    .dial-ends {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.62rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-top: 5px;
+    }
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 4px;
+      background: linear-gradient(90deg, rgba(124,110,240,0.7), rgba(124,110,240,0.2));
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      cursor: pointer;
+      box-shadow: 0 0 0 4px rgba(124,110,240,0.25);
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 16px; height: 16px; border: none;
+      border-radius: 50%; background: #fff; cursor: pointer;
+    }
+
+    .drop-cta {
+      margin-top: 8px;
+      padding: 16px;
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      text-align: center;
+      font-size: 0.74rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .drop-cta label {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .hint {
+      margin-top: 18px;
+      font-size: 0.68rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .hint b { color: var(--text); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Stage -->
+    <div class="stage">
+      <div class="map-tabs" id="map-tabs"></div>
+      <div id="dropzone">
+        <canvas id="biome-canvas"></canvas>
+      </div>
+      <div id="missing"></div>
+      <div class="stage-actions">
+        <button class="btn" id="btn-reset">Reset</button>
+        <button class="btn" id="btn-anim">Pause</button>
+        <button class="btn" id="btn-shot">Screenshot</button>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <aside class="panel">
+      <a class="back" href="index.html">← Studio</a>
+      <h1>Biome <span>Adjuster</span></h1>
+      <p class="sub">Tiled maps split into 20×20 tiles, re-imagined in real time. Drag the canvas to pan.</p>
+
+      <div class="dial">
+        <div class="dial-head"><label>Order ↔ Chaos</label><span class="val" id="dial-order-val"></span></div>
+        <input type="range" id="dial-order" min="0" max="1" step="0.01" value="0.5" />
+        <div class="dial-ends"><span>Order</span><span>Chaos</span></div>
+      </div>
+
+      <div class="dial">
+        <div class="dial-head"><label>Ordinary ↔ Imaginative</label><span class="val" id="dial-imag-val"></span></div>
+        <input type="range" id="dial-imag" min="0" max="1" step="0.01" value="0" />
+        <div class="dial-ends"><span>Ordinary</span><span>Imaginative</span></div>
+      </div>
+
+      <div class="dial">
+        <div class="dial-head"><label>Relaxed ↔ Fear</label><span class="val" id="dial-fear-val"></span></div>
+        <input type="range" id="dial-fear" min="0" max="1" step="0.01" value="0" />
+        <div class="dial-ends"><span>Relaxed</span><span>Fear</span></div>
+      </div>
+
+      <div class="dial">
+        <div class="dial-head"><label>Memory</label><span class="val" id="dial-memory-val"></span></div>
+        <input type="range" id="dial-memory" min="0" max="0.95" step="0.01" value="0" />
+        <div class="dial-ends"><span>Forget</span><span>Linger</span></div>
+      </div>
+
+      <div class="dial">
+        <div class="dial-head"><label>Zoom</label><span class="val" id="dial-zoom-val"></span></div>
+        <input type="range" id="dial-zoom" min="16" max="100" step="1" value="16" />
+        <div class="dial-ends"><span>16 tiles</span><span>100 tiles</span></div>
+      </div>
+
+      <div class="drop-cta" id="drop-cta">
+        Drop tileset <b>.png</b> / <b>.tsx</b> files anywhere to load real art,
+        or a <b>.tmx</b> to add a map.<br />
+        <label for="file-input">browse files</label>
+        <input type="file" id="file-input" multiple accept=".png,.tsx,.tmx,.jpg,.jpeg,.gif,.webp" hidden />
+      </div>
+
+      <p class="hint">
+        <b>Order</b> snaps tiles to match neighbours; <b>Chaos</b> scatters them.
+        <b>Imaginative</b> pushes hues to mixed pastels. <b>Fear</b> grows purple,
+        greens the water, and summons houndmares &amp; lazeey bom. <b>Memory</b>
+        leaves dream-trails. <b>Zoom</b> pulls back from 16 to 100 tiles across.
+      </p>
+    </aside>
+  </div>
+
+  <script src="biome.js"></script>
+</body>
+</html>
