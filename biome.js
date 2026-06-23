@@ -745,9 +745,10 @@
   }
   const terrainInfoAt = (map, wx, wy) => lookupGid(map, terrainGid(map, wx, wy));
 
-  // Detect water by sampling a tile's average colour (blue/teal). This
-  // catches watery tiles in ANY tileset — e.g. the beach map's blue sea,
-  // which isn't categorised as "water" — so nothing spawns on them.
+  // Detect water. The teal GRASS and the blue SEA have almost identical
+  // average colours, so colour alone can't tell them apart — we go semantic:
+  // a tile is water if it's the green-water tileset, OR it's a sand-map tile
+  // whose colour is blue (the sea) rather than tan (the sand).
   const _waterCache = new Map();
   const _sampC = document.createElement("canvas");
   _sampC.width = _sampC.height = 1;
@@ -757,14 +758,17 @@
     const key = info.ts.firstgid + ":" + info.local;
     let v = _waterCache.get(key);
     if (v !== undefined) return v;
+    if (info.category === "water") { _waterCache.set(key, true); return true; }
+    if (info.category !== "sand") { _waterCache.set(key, false); return false; }
+    if (!info.img.width) return false;   // image not decoded yet — retry later, don't cache
     const sx = (info.local % info.cols) * info.tw;
     const sy = Math.floor(info.local / info.cols) * info.th;
     try {
       _sampX.clearRect(0, 0, 1, 1);
       _sampX.drawImage(info.img, sx, sy, info.tw, info.th, 0, 0, 1, 1);
       const d = _sampX.getImageData(0, 0, 1, 1).data;
-      v = d[3] > 40 && d[0] < d[1] - 8 && d[0] < d[2] - 8 && d[2] > 70 && d[1] > 60;
-    } catch (e) { v = false; }
+      v = d[3] > 40 && d[2] > d[0] + 20 && d[2] > 120;   // blue sea, not tan sand
+    } catch (e) { return false; }
     _waterCache.set(key, v);
     return v;
   }
@@ -838,6 +842,7 @@
   function afterIngest() {
     purpleCache = undefined;
     tileCache.clear();
+    _waterCache.clear();
     colorEpoch++;
     refreshMapList();
     buildTerrainArt();
