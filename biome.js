@@ -491,18 +491,25 @@
     return null;
   }
 
-  // Find a loaded tileset whose name contains a substring (e.g. "ordamancer").
-  function findByName(sub) {
+  // All loaded tilesets whose name contains a substring (e.g. both
+  // "ordamancer" and "ordamancer evolved animation").
+  function findAllByName(sub) {
+    const out = [];
     for (const mName in maps) {
       const m = maps[mName];
       for (const ts of m.tilesets) {
         const nm = (ts.name || ts.tsxKey || "").toLowerCase();
         if (!nm.includes(sub)) continue;
         const probe = lookupGid(m, ts.firstgid, false);
-        if (probe && probe.img) return { map: m, gid: ts.firstgid };
+        if (probe && probe.img) out.push({ map: m, gid: ts.firstgid });
       }
     }
-    return null;
+    return out;
+  }
+  // Pick one variant deterministically per cell.
+  function pickByName(sub, wx, wy) {
+    const v = findAllByName(sub);
+    return v.length ? v[Math.floor(hash(wx, wy, 71) * v.length)] : null;
   }
 
   // Tilesets that are animation strips — cycle their frames over time.
@@ -693,7 +700,8 @@
     }
     candidates.sort((a, b) => a.score - b.score);
     for (const c of candidates.slice(0, 4)) {
-      const found = c.type === "ordamancer" ? findByName("ordamancer") : findCreatureGid(c.type);
+      // Ordamancers come in two animated variants — show both.
+      const found = c.type === "ordamancer" ? pickByName("ordamancer", c.wx, c.wy) : findCreatureGid(c.type);
       if (found) drawSprite(found.map, found.gid, c.sx, c.sy, px, t, c.wx, c.wy);
     }
     ctx.globalAlpha = 1;
