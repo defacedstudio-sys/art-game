@@ -263,7 +263,10 @@
   // ── Parsing ──────────────────────────────────────────────────────
   const parser = new DOMParser();
   const baseName = (p) => (p || "").split(/[\\/]/).pop().toLowerCase();
-  const stripExt = (p) => baseName(p).replace(/\.[^.]+$/, "");
+  // Key = basename without extension, trimmed, spaces collapsed. This lets a
+  // ".aseprite" image reference match a ".png" of the same name, and tolerates
+  // stray spaces in filenames (e.g. "yellow flowersnew .png").
+  const stripExt = (p) => baseName(p).replace(/\.[^.]+$/, "").trim().replace(/\s+/g, " ");
 
   function parseCSV(text) {
     return text.trim().split(/[\s,]+/).filter((s) => s !== "").map(Number);
@@ -305,14 +308,19 @@
     return { name: displayName, W, H, tilesets, layers, base, distinct, objects: layers.slice(1) };
   }
 
+  // Registry of loaded terrain tilesets (real art), used to substitute a
+  // same-category tileset when a terrain tileset's own art is missing.
+  let terrainArt = [];
+
   // Resolve which tileset a gid belongs to, plus the loaded image (if any).
-  function lookupGid(map, gid) {
+  // When allowFallback is set, a terrain tile with no art borrows a loaded
+  // tileset of the same biome category so the world stays real art.
+  function lookupGid(map, gid, allowFallback = true) {
     if (!gid) return null;
     let ts = null;
     for (const t of map.tilesets) { if (t.firstgid <= gid) ts = t; else break; }
     if (!ts) return null;
     const local = gid - ts.firstgid;
-    // Resolve the image: inline tileset image, or via its .tsx definition.
     let img = null, tw = ts.tw, th = ts.th, cols = ts.cols;
     if (ts.imageKey && images[ts.imageKey]) {
       img = images[ts.imageKey];
@@ -322,7 +330,31 @@
       if (images[d.imageKey]) img = images[d.imageKey];
     }
     if (img && !cols) cols = Math.max(1, Math.floor(img.width / tw));
+
+    // Terrain fallback: borrow same-category (or any) real terrain art.
+    if (!img && allowFallback && TERRAIN_CATS.has(ts.category) && terrainArt.length) {
+      const pool = terrainArt.filter((a) => a.category === ts.category);
+      const a = (pool.length ? pool : terrainArt)[0];
+      const count = a.cols * Math.max(1, Math.floor(a.img.height / a.th));
+      return { ts, local: local % count, img: a.img, tw: a.tw, th: a.th, cols: a.cols, category: ts.category };
+    }
     return { ts, local, img, tw, th, cols, category: ts.category };
+  }
+
+  // Rebuild the terrain-art registry from everything currently loaded.
+  function buildTerrainArt() {
+    const seen = new Set();
+    terrainArt = [];
+    for (const nm in maps) {
+      for (const ts of maps[nm].tilesets) {
+        if (!TERRAIN_CATS.has(ts.category)) continue;
+        const info = lookupGid(maps[nm], ts.firstgid, false);
+        if (info && info.img && !seen.has(info.img.src)) {
+          seen.add(info.img.src);
+          terrainArt.push({ img: info.img, tw: info.tw, th: info.th, cols: info.cols, category: ts.category });
+        }
+      }
+    }
   }
 
   // ── State / dials ────────────────────────────────────────────────
@@ -462,11 +494,14 @@
   // placeholder blobs, no bouncing: if the sprite isn't available, the
   // tile simply isn't drawn.
   function drawSprite(map, gid, x, y, px) {
-    const info = lookupGid(map, gid);
+    const info = lookupGid(map, gid, false);   // creatures: real art only
     if (!info || !info.img) return;
     const sx = (info.local % info.cols) * info.tw;
     const sy = Math.floor(info.local / info.cols) * info.th;
-    ctx.drawImage(info.img, sx, sy, info.tw, info.th, x, y, Math.ceil(px), Math.ceil(px));
+    // Preserve aspect; anchor to the cell's bottom so tall sprites stand up.
+    const w = Math.ceil(px);
+    const h = Math.ceil(px * (info.th / info.tw));
+    ctx.drawImage(info.img, sx, sy, info.tw, info.th, x, y + px - h, w, h);
   }
 
   // ── Unified world ────────────────────────────────────────────────
@@ -631,8 +666,41 @@
     tileCache.clear();
     colorEpoch++;
     refreshMapList();
+    buildTerrainArt();
     updateMissing();
     needsRedraw = true;
+  }
+
+  // Auto-load tileset art committed in /assets (listed in manifest.json) so
+  // the deployed site shows real tiles with no drag-and-drop needed.
+  function loadBundledAssets() {
+    fetch("assets/manifest.json").then((r) => r.ok ? r.json() : []).then((list) => {
+      if (!list || !list.length) return;
+      let pending = list.length;
+      const done = () => { if (--pending === 0) afterIngest(); };
+      for (const name of list) {
+        const url = "assets/" + encodeURIComponent(name);
+        const ext = name.toLowerCase().split(".").pop();
+        if (ext === "png") {
+          const img = new Image();
+          img.onload = done; img.onerror = done; img.src = url;
+          images[stripExt(name)] = img;
+        } else if (ext === "tsx") {
+          fetch(url).then((r) => r.text()).then((txt) => {
+            const doc = parser.parseFromString(txt, "text/xml");
+            const ts = doc.querySelector("tileset"), im = doc.querySelector("image");
+            if (ts && im) tsxDefs[stripExt(name)] = {
+              imageKey: stripExt(im.getAttribute("source")),
+              tw: +(ts.getAttribute("tilewidth") || 20),
+              th: +(ts.getAttribute("tileheight") || 20),
+              cols: +(ts.getAttribute("columns") || 0),
+              count: +(ts.getAttribute("tilecount") || 0),
+            };
+            done();
+          }).catch(done);
+        } else done();
+      }
+    }).catch(() => {});
   }
 
   // ── UI ───────────────────────────────────────────────────────────
@@ -740,6 +808,7 @@
     refreshMapList();
     bindUI();
     updateMissing();
+    loadBundledAssets();
     requestAnimationFrame(loop);
   }
 
