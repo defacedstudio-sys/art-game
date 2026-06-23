@@ -505,14 +505,27 @@
     return null;
   }
 
-  // Draw an object/creature — ONLY if its real art is loaded. No
-  // placeholder blobs, no bouncing: if the sprite isn't available, the
-  // tile simply isn't drawn.
-  function drawSprite(map, gid, x, y, px) {
+  // Tilesets that are animation strips — cycle their frames over time.
+  const ANIM_RE = /houndmare|lazeey|ordamancer/;
+
+  // Draw an object/creature — ONLY if its real art is loaded. Houndmares,
+  // lazeey (sloths) and ordamancers animate by cycling their sprite-sheet
+  // frames; a per-cell phase keeps them out of lockstep.
+  function drawSprite(map, gid, x, y, px, t, wx, wy) {
     const info = lookupGid(map, gid, false);   // creatures: real art only
     if (!info || !info.img) return;
-    const sx = (info.local % info.cols) * info.tw;
-    const sy = Math.floor(info.local / info.cols) * info.th;
+    let frame = info.local;
+    const nm = (info.ts.name || info.ts.tsxKey || "").toLowerCase();
+    if (animate && ANIM_RE.test(nm)) {
+      const rows = Math.max(1, Math.round(info.img.height / info.th));
+      const frames = Math.max(1, info.cols * rows);
+      if (frames > 1) {
+        const phase = Math.floor(hash(wx, wy, 13) * frames);
+        frame = (Math.floor(t / 110) + phase) % frames;
+      }
+    }
+    const sx = (frame % info.cols) * info.tw;
+    const sy = Math.floor(frame / info.cols) * info.th;
     // Preserve aspect; anchor to the cell's bottom so tall sprites stand up.
     const w = Math.ceil(px);
     const h = Math.ceil(px * (info.th / info.tw));
@@ -640,19 +653,19 @@
         const ly = ((wy % map.H) + map.H) % map.H;
 
         for (const g of objectsAt(map, lx, ly))
-          drawSprite(map, g, sx, sy, px);
+          drawSprite(map, g, sx, sy, px, t, wx, wy);
 
         // Houndmares haunt the fearful/chaotic side; sloths laze on the
         // relaxed/chaotic side; ordamancers keep order on the orderly side.
         if (hash(wx, wy, 53) < houndP) {
           const c = findCreatureGid("houndmare");
-          if (c) drawSprite(c.map, c.gid, sx, sy, px);
+          if (c) drawSprite(c.map, c.gid, sx, sy, px, t, wx, wy);
         } else if (hash(wx, wy, 59) < slothP) {
           const c = findCreatureGid("lazeey");
-          if (c) drawSprite(c.map, c.gid, sx, sy, px);
+          if (c) drawSprite(c.map, c.gid, sx, sy, px, t, wx, wy);
         } else if (hash(wx, wy, 67) < ordaP) {
           const c = findByName("ordamancer");
-          if (c) drawSprite(c.map, c.gid, sx, sy, px);
+          if (c) drawSprite(c.map, c.gid, sx, sy, px, t, wx, wy);
         }
       }
     }
