@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [claude/amazing-babbage-vx87ly]
+    branches: [claude/art-game-falling-blocks-lM0Qs]
   workflow_dispatch:
 
 permissions:
