@@ -1,0 +1,763 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Biome Adjuster
+   Loads Tiled (.tmx) maps split into 20×20 tiles and re-imagines them in
+   real time through five dials:
+     • Order ↔ Chaos        – how well neighbouring tiles match
+     • Ordinary ↔ Imaginative – pastel hue mixing
+     • Relaxed ↔ Fear        – purple creep, greener water, more monsters
+     • Memory                – afterimage / dream persistence
+     • Zoom                  – pull back from 16 to 100 tiles across
+   Tile art is supplied by dragging the matching .png / .tsx files in.
+   Anything without art falls back to a generated colour block.
+   ═══════════════════════════════════════════════════════════════════ */
+
+(() => {
+  "use strict";
+
+  // ── Built-in map layouts (the four uploaded .tmx files) ──────────
+  // Stored as raw TMX so they parse through the same path as dropped files.
+  const BUILTIN_MAPS = {
+    "grass farm": `<?xml version="1.0" encoding="UTF-8"?>
+<map width="16" height="9" tilewidth="20" tileheight="20">
+ <tileset firstgid="1" source="tiling work.tsx"/>
+ <tileset firstgid="25" source="new tiling.tsx"/>
+ <tileset firstgid="49" source="new ne tiling.tsx"/>
+ <tileset firstgid="73" source="new nnee tiling.tsx"/>
+ <tileset firstgid="97" source="noeste niceles.tsx"/>
+ <tileset firstgid="121" source="tii boy 2.tsx"/>
+ <tileset firstgid="122" source="characters turning.tsx"/>
+ <tileset firstgid="126" source="lazeey.tsx"/>
+ <tileset firstgid="127" source="2lazeey.tsx"/>
+ <tileset firstgid="128" source="mkkey.tsx"/>
+ <tileset firstgid="129" source="soil tiles.tsx"/>
+ <tileset firstgid="134" source="yellow flowersnew.tsx"/>
+ <tileset firstgid="136" source="fishermen.tsx"/>
+ <tileset firstgid="137" source="sitting-export.tsx"/>
+ <tileset firstgid="138" source="left side net.tsx"/>
+ <tileset firstgid="139" source="ideas maybe.tsx"/>
+ <tileset firstgid="167" source="dogleg.tsx"/>
+ <tileset firstgid="168" source="elmur.tsx"/>
+ <tileset firstgid="169" source="hatredd.tsx"/>
+ <tileset firstgid="170" source="lion.tsx"/>
+ <tileset firstgid="171" source="plant.tsx"/>
+ <tileset firstgid="172" source="plant blue.tsx"/>
+ <tileset firstgid="173" source="cat blue.tsx"/>
+ <tileset firstgid="174" source="blue dog.tsx"/>
+ <tileset firstgid="175" source="blue spike.tsx"/>
+ <tileset firstgid="176" source="yellow lion.tsx"/>
+ <tileset firstgid="177" source="yellow dino.tsx"/>
+ <tileset firstgid="178" source="yellow shooter.tsx"/>
+ <tileset firstgid="179" source="yellow easter.tsx"/>
+ <tileset firstgid="180" source="yellow balls.tsx"/>
+ <tileset firstgid="181" source="red mop.tsx"/>
+ <tileset firstgid="182" source="red ball.tsx"/>
+ <tileset firstgid="183" source="red tall.tsx"/>
+ <tileset firstgid="184" source="red tri.tsx"/>
+ <tileset firstgid="185" source="toolbar 2.tsx"/>
+ <tileset firstgid="186" source="idea caught sprite.tsx"/>
+ <tileset firstgid="218" source="lazeey bby.tsx"/>
+ <tileset firstgid="219" source="lazeey bomn.tsx"/>
+ <tileset firstgid="220" source="lazeey bom.tsx"/>
+ <tileset firstgid="242" source="ordamancer evolved animation.tsx"/>
+ <tileset firstgid="260" source="lazeey bby snot.tsx"/>
+ <tileset firstgid="306" source="ordamancer.tsx"/>
+ <tileset firstgid="325" source="baby houndmare.tsx"/>
+ <tileset firstgid="337" source="houndmare animated.tsx"/>
+ <tileset firstgid="349" source="big lazeey.tsx"/>
+ <tileset firstgid="412" source="big lazeey.tsx"/>
+ <layer id="1" name="Tile Layer 1" width="16" height="9"><data encoding="csv">
+87,87,87,64,64,87,87,113,90,31,38,38,64,85,87,87,
+64,82,39,85,85,113,90,87,113,90,113,90,82,64,64,85,
+87,85,85,32,113,113,38,31,31,38,113,115,12,99,113,64,
+87,113,90,81,32,32,38,38,85,85,38,2,102,5,82,87,
+86,86,113,113,115,75,90,38,38,113,85,4,118,21,99,64,
+32,32,85,82,28,96,85,85,87,87,31,31,2,102,5,87,
+86,86,113,90,113,64,87,64,85,31,81,32,2,119,48,85,
+64,87,31,85,64,85,87,85,113,90,113,31,100,72,85,87,
+86,64,31,85,31,85,64,87,113,113,85,85,87,85,31,31
+</data></layer>
+ <layer id="2" name="Tile Layer 2" width="16" height="9"><data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,308,242,0,0,0,0,135,129,0,423,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,337,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,217,0,335,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,135,132,0,0,305,0,0,0,0,0,0,0,
+0,0,0,134,130,131,0,0,0,0,0,0,0,0,0,0,
+185,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+</data></layer>
+</map>`,
+    "sand": `<?xml version="1.0" encoding="UTF-8"?>
+<map width="16" height="9" tilewidth="20" tileheight="20">
+ <tileset firstgid="1" source="sand.tsx"/>
+ <tileset firstgid="25" source="tii boy 2.tsx"/>
+ <tileset firstgid="26" source="lazeey.tsx"/>
+ <tileset firstgid="27" source="mkkey.tsx"/>
+ <tileset firstgid="28" source="soil tiles.tsx"/>
+ <tileset firstgid="33" source="left side net.tsx"/>
+ <tileset firstgid="34" source="fishermen.tsx"/>
+ <tileset firstgid="35" source="redbob.tsx"/>
+ <tileset firstgid="36" source="lion.tsx"/>
+ <tileset firstgid="37" source="red tri.tsx"/>
+ <tileset firstgid="38" source="yellow lion.tsx"/>
+ <tileset firstgid="39" source="yellow easter.tsx"/>
+ <tileset firstgid="40" source="red tall.tsx"/>
+ <tileset firstgid="41" source="blue spike.tsx"/>
+ <tileset firstgid="42" source="yellow shooter.tsx"/>
+ <layer id="1" name="Tile Layer 1" width="16" height="9"><data encoding="csv">
+6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
+6,6,6,6,6,6,6,1,1,6,6,6,6,6,6,6,
+6,6,6,6,6,17,18,8,8,4,16,6,6,6,6,6,
+6,6,6,6,17,18,10,8,8,8,2,6,6,6,6,6,
+6,6,6,6,5,9,8,8,7,9,2,6,6,6,6,6,
+6,6,6,6,5,19,8,8,8,13,6,6,6,6,6,6,
+6,6,6,6,5,19,19,8,13,14,6,6,6,6,6,6,
+6,6,6,6,15,3,19,13,14,6,6,6,6,6,6,6,
+6,6,6,6,6,15,12,14,6,6,6,6,6,6,6,6
+</data></layer>
+ <layer id="2" name="Tile Layer 2" width="16" height="9"><data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,17,0,0,16,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,31,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,39,0,31,0,0,0,0,0,0,
+0,0,0,0,0,38,0,0,8,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,7,34,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+</data></layer>
+</map>`,
+    "purple": `<?xml version="1.0" encoding="UTF-8"?>
+<map width="16" height="9" tilewidth="20" tileheight="20">
+ <tileset firstgid="1" name="purptiles" tilewidth="20" tileheight="20" tilecount="9" columns="9">
+  <image source="purptiles.png" width="180" height="20"/>
+ </tileset>
+ <tileset firstgid="10" source="green water.tsx"/>
+ <tileset firstgid="37" source="characters turning.tsx"/>
+ <tileset firstgid="41" source="soil tiles.tsx"/>
+ <tileset firstgid="46" source="yellow flowersnew.tsx"/>
+ <tileset firstgid="48" source="lion.tsx"/>
+ <tileset firstgid="49" source="sun circle.tsx"/>
+ <tileset firstgid="50" source="dogleg.tsx"/>
+ <tileset firstgid="51" source="redbob.tsx"/>
+ <tileset firstgid="52" source="yellow balls.tsx"/>
+ <tileset firstgid="53" source="plant blue.tsx"/>
+ <tileset firstgid="54" source="red tri.tsx"/>
+ <tileset firstgid="55" source="yellow dino.tsx"/>
+ <layer id="1" name="Tile Layer 1" width="16" height="9"><data encoding="csv">
+8,6,9,9,1,3,8,8,1,1,4,4,9,6,6,1,
+1,9,4,4,6,6,6,6,1,3,3,6,6,6,9,6,
+1,6,4,3,8,2,3,5,3,9,6,1,9,3,6,6,
+6,7,8,5,5,7,9,4,2,6,6,5,1,34,4,8,
+7,6,8,3,1,3,2,1,8,1,7,8,5,16,7,8,
+1,6,8,1,4,9,1,5,5,7,1,3,4,6,7,7,
+6,1,3,1,6,6,2,3,1,6,2,8,6,1,3,3,
+4,9,6,25,35,5,6,7,3,6,6,7,4,6,9,4,
+3,4,4,4,4,6,5,6,8,8,3,6,1,8,4,4
+</data></layer>
+ <layer id="2" name="Tile Layer 2" width="16" height="9"><data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,54,0,0,0,0,0,0,0,0,43,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,46,45,4,53,0,
+0,0,0,0,0,0,0,38,0,0,0,0,0,4,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,47,43,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,6,6,7,0,0,0,0,52,0,0,0,0,0,0,
+0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0
+</data></layer>
+</map>`,
+    "unconscious": `<?xml version="1.0" encoding="UTF-8"?>
+<map width="16" height="9" tilewidth="20" tileheight="20">
+ <tileset firstgid="1" source="unconscious.tsx"/>
+ <tileset firstgid="31" source="tii boy 2.tsx"/>
+ <tileset firstgid="32" source="sitting-export.tsx"/>
+ <tileset firstgid="33" source="sitting sheep-export.tsx"/>
+ <tileset firstgid="34" source="purple work.tsx"/>
+ <tileset firstgid="43" source="eart.tsx"/>
+ <tileset firstgid="44" source="eatthideaa.tsx"/>
+ <tileset firstgid="47" source="tii boy 2look down.tsx"/>
+ <tileset firstgid="48" source="tii boy 2 ginger.tsx"/>
+ <tileset firstgid="49" source="tii boy 2 ginger.tsx"/>
+ <tileset firstgid="50" source="earth middle.tsx"/>
+ <tileset firstgid="51" source="eatthideaa-export.tsx"/>
+ <tileset firstgid="56" source="choose ideas.tsx"/>
+ <tileset firstgid="57" source="fishermen.tsx"/>
+ <tileset firstgid="58" source="big earth.tsx"/>
+ <tileset firstgid="62" source="stars minimal.tsx"/>
+ <tileset firstgid="65" source="freee.tsx"/>
+ <layer id="1" name="Tile Layer 1" width="16" height="9"><data encoding="csv">
+21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,
+21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,
+21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,
+21,21,21,21,21,21,45,45,45,45,21,21,21,21,21,21,
+21,21,21,21,45,45,44,44,44,44,45,45,21,21,21,21,
+21,21,45,45,44,44,44,44,44,44,44,44,45,45,21,21,
+21,45,44,44,44,44,44,44,44,44,44,44,44,44,45,21,
+45,44,44,44,44,44,44,44,44,44,44,44,44,44,44,45,
+44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44
+</data></layer>
+ <layer id="3" name="Tile Layer 2" width="16" height="9"><data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,47,49,0,0,0,0,0,0,0,
+0,0,0,0,0,0,52,52,52,52,0,0,0,0,0,0,
+0,0,0,0,52,52,0,0,0,0,52,52,0,0,0,0,
+0,0,52,52,0,0,0,0,0,0,0,0,52,52,0,0,
+0,52,0,0,0,0,0,0,0,0,0,0,0,0,52,0,
+52,0,0,0,63,0,0,62,63,0,0,0,0,0,0,52,
+0,0,0,63,63,0,63,0,0,64,0,63,0,0,0,0
+</data></layer>
+ <layer id="4" name="Tile Layer 3" width="16" height="9"><data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,63,0,0,0,0,0,0,0,
+0,0,0,0,0,63,64,0,0,63,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,64,0,0,0,0,0,
+0,0,0,0,0,0,0,58,59,0,0,62,0,63,0,0
+</data></layer>
+</map>`,
+  };
+
+  // ── Tile category classification (by tileset name / source file) ─
+  // Maps the human-readable tileset name to a biome role so the dials
+  // know which tiles are water, which are monsters, etc.
+  function classify(name) {
+    const n = (name || "").toLowerCase();
+    if (/water/.test(n)) return "water";
+    if (/houndmare/.test(n)) return "houndmare";
+    if (/lazeey/.test(n)) return "lazeey";
+    if (/purp/.test(n)) return "purple";
+    if (/sand/.test(n)) return "sand";
+    if (/soil|dirt/.test(n)) return "soil";
+    if (/earth|eart/.test(n)) return "earth";
+    if (/unconscious/.test(n)) return "dream";
+    if (/star/.test(n)) return "star";
+    if (/flower|plant|easter|balls/.test(n)) return "flora";
+    if (/boy|character|ginger|turning|look down|sitting|fishermen|elmur|hatred|mkkey|sheep|ordamancer|freee|choose|idea|toolbar|net/.test(n)) return "character";
+    if (/lion|dino|dog|cat|bob|shooter|spike|mop|ball|tri|tall|sun|snot|bom|bby/.test(n)) return "creature";
+    return "grass"; // tiling work / new tiling / noeste niceles / etc.
+  }
+
+  // Base HSL colour per category — used to draw fallback blocks and to
+  // tint creatures spawned without art.
+  const CAT_HSL = {
+    grass: [110, 38, 42], water: [202, 55, 48], sand: [44, 52, 68],
+    soil: [26, 45, 34], earth: [32, 40, 40], purple: [278, 46, 46],
+    dream: [250, 34, 32], star: [232, 45, 14], flora: [330, 55, 66],
+    creature: [12, 60, 52], houndmare: [285, 42, 34], lazeey: [85, 52, 55],
+    character: [210, 28, 56], generic: [0, 0, 48],
+  };
+  const TERRAIN_CATS = new Set(["grass", "water", "sand", "soil", "earth", "purple", "dream", "star", "generic"]);
+  const CREATURE_CATS = new Set(["creature", "houndmare", "lazeey", "character", "flora"]);
+
+  // ── Asset pools (filled by the drop loader) ──────────────────────
+  const images = {};   // basename(lower) -> HTMLImageElement
+  const tsxDefs = {};  // basename(lower) -> { imageFile, tw, th, cols, count }
+  const maps = {};     // displayName -> parsed map object
+  let activeMapName = null;
+
+  // ── Parsing ──────────────────────────────────────────────────────
+  const parser = new DOMParser();
+  const baseName = (p) => (p || "").split(/[\\/]/).pop().toLowerCase();
+  const stripExt = (p) => baseName(p).replace(/\.[^.]+$/, "");
+
+  function parseCSV(text) {
+    return text.trim().split(/[\s,]+/).filter((s) => s !== "").map(Number);
+  }
+
+  function parseTMX(xmlText, displayName) {
+    const doc = parser.parseFromString(xmlText, "text/xml");
+    const mapEl = doc.querySelector("map");
+    const W = +mapEl.getAttribute("width");
+    const H = +mapEl.getAttribute("height");
+
+    const tilesets = [...doc.querySelectorAll("map > tileset")].map((ts) => {
+      const firstgid = +ts.getAttribute("firstgid");
+      const source = ts.getAttribute("source");          // .tsx reference
+      const inlineImg = ts.querySelector("image");        // inline tileset
+      const name = ts.getAttribute("name") || (source ? stripExt(source) : "tiles");
+      const def = {
+        firstgid,
+        name,
+        category: classify(source ? stripExt(source) : name),
+        tsxKey: source ? stripExt(source) : null,
+        tw: +(ts.getAttribute("tilewidth") || 20),
+        th: +(ts.getAttribute("tileheight") || 20),
+        cols: +(ts.getAttribute("columns") || 0),
+        count: +(ts.getAttribute("tilecount") || 0),
+        imageKey: inlineImg ? stripExt(inlineImg.getAttribute("source")) : null,
+      };
+      return def;
+    }).sort((a, b) => a.firstgid - b.firstgid);
+
+    const layers = [...doc.querySelectorAll("layer")].map((l, i) => ({
+      index: i,
+      data: parseCSV(l.querySelector("data").textContent),
+    }));
+
+    const base = layers[0];
+    const distinct = [...new Set(base.data.filter((g) => g > 0))];
+
+    return { name: displayName, W, H, tilesets, layers, base, distinct, objects: layers.slice(1) };
+  }
+
+  // Resolve which tileset a gid belongs to, plus the loaded image (if any).
+  function lookupGid(map, gid) {
+    if (!gid) return null;
+    let ts = null;
+    for (const t of map.tilesets) { if (t.firstgid <= gid) ts = t; else break; }
+    if (!ts) return null;
+    const local = gid - ts.firstgid;
+    // Resolve the image: inline tileset image, or via its .tsx definition.
+    let img = null, tw = ts.tw, th = ts.th, cols = ts.cols;
+    if (ts.imageKey && images[ts.imageKey]) {
+      img = images[ts.imageKey];
+    } else if (ts.tsxKey && tsxDefs[ts.tsxKey]) {
+      const d = tsxDefs[ts.tsxKey];
+      tw = d.tw; th = d.th; cols = d.cols;
+      if (images[d.imageKey]) img = images[d.imageKey];
+    }
+    if (img && !cols) cols = Math.max(1, Math.floor(img.width / tw));
+    return { ts, local, img, tw, th, cols, category: ts.category };
+  }
+
+  // ── State / dials ────────────────────────────────────────────────
+  const dials = { order: 0.5, imag: 0, fear: 0, memory: 0, zoom: 16 };
+  let camX = 0, camY = 0;          // camera origin in world-tile coords
+  let animate = true;
+  let tileCache = new Map();        // tinted-tile cache, cleared on colour change
+  let colorEpoch = 0;
+
+  const canvas = document.getElementById("biome-canvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = 320; canvas.height = 180;
+  ctx.imageSmoothingEnabled = false;
+
+  // ── Deterministic hash noise (stable per world cell) ─────────────
+  function hash(x, y, s) {
+    let h = (x | 0) * 374761393 + (y | 0) * 668265263 + (s | 0) * 2246822519;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  // ── Order ↔ Chaos: transform a terrain gid for world cell (wx,wy) ─
+  function terrainGid(map, wx, wy) {
+    const lx = ((wx % map.W) + map.W) % map.W;
+    const ly = ((wy % map.H) + map.H) % map.H;
+    let gid = map.base.data[ly * map.W + lx];
+
+    const order = Math.max(0, (0.5 - dials.order) * 2);  // left of centre
+    const chaos = Math.max(0, (dials.order - 0.5) * 2);  // right of centre
+
+    // Order: snap mismatched tiles to the dominant neighbour (tiles match).
+    if (order > 0 && hash(wx, wy, 11) < order) {
+      const counts = {};
+      const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of nb) {
+        const nx = ((wx + dx) % map.W + map.W) % map.W;
+        const ny = ((wy + dy) % map.H + map.H) % map.H;
+        const g = map.base.data[ny * map.W + nx];
+        if (g > 0) counts[g] = (counts[g] || 0) + 1;
+      }
+      let best = gid, bc = -1;
+      for (const g in counts) if (counts[g] > bc) { bc = counts[g]; best = +g; }
+      gid = best;
+    }
+    // Chaos: replace with a random terrain tile from this map (less matched).
+    if (chaos > 0 && hash(wx, wy, 23) < chaos && map.distinct.length) {
+      gid = map.distinct[Math.floor(hash(wx, wy, 37) * map.distinct.length)];
+    }
+    return gid;
+  }
+
+  // ── Colour tinting (Ordinary↔Imaginative, Fear water-green) ───────
+  // Builds and caches a tinted 20×20 tile. Signature is quantised so only
+  // a handful of variants ever exist.
+  function tintedTile(info, sig) {
+    const key = `${info.ts.firstgid}:${info.local}:${sig.h}:${sig.s}:${sig.b}`;
+    let c = tileCache.get(key);
+    if (c) return c;
+    c = document.createElement("canvas");
+    c.width = info.tw; c.height = info.th;
+    const cx = c.getContext("2d");
+    cx.imageSmoothingEnabled = false;
+    if (sig.h || sig.s !== 100 || sig.b !== 100)
+      cx.filter = `hue-rotate(${sig.h}deg) saturate(${sig.s}%) brightness(${sig.b}%)`;
+    const sx = (info.local % info.cols) * info.tw;
+    const sy = Math.floor(info.local / info.cols) * info.th;
+    cx.drawImage(info.img, sx, sy, info.tw, info.th, 0, 0, info.tw, info.th);
+    if (tileCache.size > 4000) tileCache.clear();
+    tileCache.set(key, c);
+    return c;
+  }
+
+  // Compute the tint signature for a tile. Kept independent of per-cell
+  // coordinates (apart from a 3-step "tone band") so the tinted-tile cache
+  // stays tiny: at most a few distinct tiles × 3 bands × a couple of states.
+  //   band: 0/1/2 selects a hue-mixing offset for Imaginative tone variety.
+  function tintSig(category, band, t) {
+    const imag = dials.imag, fear = dials.fear;
+    let hue = 0;
+    let sat = lerp(100, 62, imag);            // pastel: lower saturation
+    let bri = lerp(100, 122, imag);           // pastel: brighter
+    if (imag > 0) hue += imag * 25 + (band - 1) * imag * 30;
+    if (fear > 0) {
+      if (category === "water") { hue += -70 * fear; sat = lerp(sat, sat + 25, fear); }
+      else { hue += 18 * fear; sat = lerp(sat, sat * 0.92, fear); }
+    }
+    // Global breathing (time only) gives the Memory dial trails to gather.
+    hue += Math.sin(t * 0.0006) * dials.memory * 10;
+    return {
+      h: Math.round(hue / 6) * 6,
+      s: Math.round(sat / 5) * 5,
+      b: Math.round(bri / 4) * 4,
+    };
+  }
+  const toneBand = (wx, wy) => (dials.imag > 0 ? (hash(wx, wy, 7) * 3) | 0 : 1);
+
+  // ── Fallback colour block when a tile has no loaded art ──────────
+  function fallbackBlock(category, wx, wy, x, y, px, t) {
+    const base = CAT_HSL[category] || CAT_HSL.generic;
+    const sig = tintSig(category, toneBand(wx, wy), t);
+    let [h, s, l] = base;
+    h += sig.h + (hash(wx, wy, 3) - 0.5) * 12;
+    s = s * (sig.s / 100);
+    l = Math.min(92, l * (sig.b / 100) + (hash(wx, wy, 5) - 0.5) * 6);
+    ctx.fillStyle = `hsl(${h},${s}%,${l}%)`;
+    ctx.fillRect(x, y, Math.ceil(px), Math.ceil(px));
+  }
+
+  // ── Object / creature layer (Fear spawns more monsters) ──────────
+  // Pre-index object placements per local cell across the active map's
+  // object layers, then add fear-driven monster spawns at render time.
+  function objectsAt(map, lx, ly) {
+    const out = [];
+    for (const layer of map.objects) {
+      const g = layer.data[ly * map.W + lx];
+      if (g > 0) out.push(g);
+    }
+    return out;
+  }
+
+  // Find a loaded tileset of a given category anywhere in the asset pool,
+  // so Fear can summon houndmares/lazeey even on maps that lack them.
+  function findCreatureGid(category) {
+    for (const mName in maps) {
+      const m = maps[mName];
+      for (const ts of m.tilesets) {
+        if (ts.category !== category) continue;
+        const probe = lookupGid(m, ts.firstgid);
+        if (probe && probe.img) return { map: m, gid: ts.firstgid };
+      }
+    }
+    return null;
+  }
+
+  function drawSprite(map, gid, x, y, px, t, jitterSeed) {
+    const info = lookupGid(map, gid);
+    const bob = animate ? Math.sin(t * 0.004 + jitterSeed) * px * 0.06 : 0;
+    if (info && info.img) {
+      const sx = (info.local % info.cols) * info.tw;
+      const sy = Math.floor(info.local / info.cols) * info.th;
+      ctx.drawImage(info.img, sx, sy, info.tw, info.th, x, y + bob, Math.ceil(px), Math.ceil(px));
+    } else if (info) {
+      // No art — draw a little category-coloured creature blob.
+      const [h, s, l] = CAT_HSL[info.category] || CAT_HSL.creature;
+      ctx.fillStyle = `hsl(${h},${s}%,${l}%)`;
+      const r = px * 0.34;
+      ctx.beginPath();
+      ctx.arc(x + px / 2, y + px / 2 + bob, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#0008";
+      ctx.fillRect(x + px * 0.36, y + px * 0.4 + bob, px * 0.08, px * 0.08);
+      ctx.fillRect(x + px * 0.56, y + px * 0.4 + bob, px * 0.08, px * 0.08);
+    }
+  }
+
+  // ── Render ───────────────────────────────────────────────────────
+  function render(t) {
+    const map = maps[activeMapName];
+    if (!map) return;
+
+    // Memory: partial clear leaves dreamy afterimages.
+    const clearA = lerp(1, 0.10, dials.memory);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = `rgba(12,12,18,${clearA})`;
+    ctx.fillRect(0, 0, 320, 180);
+
+    const across = dials.zoom;
+    const px = 320 / across;
+    const down = Math.ceil(180 / px) + 1;
+    const ox = Math.floor(camX), oy = Math.floor(camY);
+    const fx = (camX - ox) * px, fy = (camY - oy) * px;
+    const tileAlpha = lerp(1, 0.62, dials.memory);
+
+    // Terrain pass.
+    for (let j = -1; j < down; j++) {
+      for (let i = -1; i <= across; i++) {
+        const wx = ox + i, wy = oy + j;
+        const sx = i * px - fx, sy = j * px - fy;
+
+        let gid = terrainGid(map, wx, wy);
+        let info = lookupGid(map, gid);
+        let category = info ? info.category : "generic";
+
+        // Fear: purple creep — convert some terrain to purple tiles.
+        if (dials.fear > 0 && category !== "purple" &&
+            hash(wx, wy, 91) < dials.fear * 0.4) {
+          const p = findPurpleGid(map);
+          if (p) { gid = p.gid; info = lookupGid(p.map, p.gid); category = "purple"; }
+          else category = "purple";
+        }
+
+        ctx.globalAlpha = tileAlpha;
+        if (info && info.img) {
+          const sig = tintSig(category, toneBand(wx, wy), t);
+          const tile = tintedTile(info, sig);
+          ctx.drawImage(tile, sx, sy, Math.ceil(px), Math.ceil(px));
+        } else {
+          fallbackBlock(category, wx, wy, sx, sy, px, t);
+        }
+      }
+    }
+
+    // Object + creature pass (only when zoomed in enough to matter).
+    ctx.globalAlpha = tileAlpha;
+    for (let j = -1; j < down; j++) {
+      for (let i = -1; i <= across; i++) {
+        const wx = ox + i, wy = oy + j;
+        const sx = i * px - fx, sy = j * px - fy;
+        const lx = ((wx % map.W) + map.W) % map.W;
+        const ly = ((wy % map.H) + map.H) % map.H;
+
+        for (const g of objectsAt(map, lx, ly))
+          drawSprite(map, g, sx, sy, px, t, wx * 1.7 + wy);
+
+        // Fear: extra houndmares & lazeey bom inhabitants.
+        if (dials.fear > 0.05) {
+          const r = hash(wx, wy, 53);
+          if (r < dials.fear * 0.16) {
+            const want = hash(wx, wy, 61) < 0.5 ? "houndmare" : "lazeey";
+            const c = findCreatureGid(want) || { map, gid: 0 };
+            if (c.gid) drawSprite(c.map, c.gid, sx, sy, px, t, wx + wy * 2.3);
+            else {
+              ctx.fillStyle = want === "houndmare" ? "hsl(285,55%,40%)" : "hsl(85,55%,55%)";
+              ctx.beginPath();
+              ctx.arc(sx + px / 2, sy + px / 2, px * 0.3, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  let purpleCache;
+  function findPurpleGid(map) {
+    if (purpleCache !== undefined) return purpleCache;
+    purpleCache = findGidByCategory("purple");
+    return purpleCache;
+  }
+  function findGidByCategory(category) {
+    for (const mName in maps) {
+      const m = maps[mName];
+      for (const ts of m.tilesets) {
+        if (ts.category !== category) continue;
+        const probe = lookupGid(m, ts.firstgid);
+        if (probe && probe.img) return { map: m, gid: ts.firstgid };
+      }
+    }
+    return null;
+  }
+
+  function loop(t) {
+    requestAnimationFrame(loop);
+    if (!animate && !needsRedraw) return;
+    render(t);
+    needsRedraw = false;
+  }
+  let needsRedraw = true;
+
+  // ── Asset ingest ─────────────────────────────────────────────────
+  function ingestFiles(fileList) {
+    const files = [...fileList];
+    let pending = files.length;
+    if (!pending) return;
+    const done = () => { if (--pending === 0) afterIngest(); };
+
+    for (const f of files) {
+      const ext = f.name.toLowerCase().split(".").pop();
+      if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "gif" || ext === "webp") {
+        const img = new Image();
+        img.onload = done; img.onerror = done;
+        img.src = URL.createObjectURL(f);
+        images[stripExt(f.name)] = img;
+      } else if (ext === "tsx") {
+        f.text().then((txt) => {
+          const doc = parser.parseFromString(txt, "text/xml");
+          const ts = doc.querySelector("tileset");
+          const im = doc.querySelector("image");
+          if (ts && im) {
+            tsxDefs[stripExt(f.name)] = {
+              imageKey: stripExt(im.getAttribute("source")),
+              tw: +(ts.getAttribute("tilewidth") || 20),
+              th: +(ts.getAttribute("tileheight") || 20),
+              cols: +(ts.getAttribute("columns") || 0),
+              count: +(ts.getAttribute("tilecount") || 0),
+            };
+          }
+          done();
+        }).catch(done);
+      } else if (ext === "tmx") {
+        f.text().then((txt) => {
+          const nm = stripExt(f.name);
+          maps[nm] = parseTMX(txt, nm);
+          if (!activeMapName) activeMapName = nm;
+          done();
+        }).catch(done);
+      } else done();
+    }
+  }
+
+  function afterIngest() {
+    purpleCache = undefined;
+    tileCache.clear();
+    colorEpoch++;
+    buildMapTabs();
+    updateMissing();
+    needsRedraw = true;
+  }
+
+  // ── UI ───────────────────────────────────────────────────────────
+  function buildMapTabs() {
+    const wrap = document.getElementById("map-tabs");
+    wrap.innerHTML = "";
+    for (const nm in maps) {
+      const b = document.createElement("button");
+      b.className = "tab" + (nm === activeMapName ? " active" : "");
+      b.textContent = nm;
+      b.onclick = () => {
+        activeMapName = nm; camX = 0; camY = 0;
+        purpleCache = undefined; buildMapTabs(); updateMissing(); needsRedraw = true;
+      };
+      wrap.appendChild(b);
+    }
+  }
+
+  function updateMissing() {
+    const map = maps[activeMapName];
+    const el = document.getElementById("missing");
+    if (!map) { el.textContent = ""; return; }
+    const need = new Set();
+    for (const ts of map.tilesets) {
+      const probe = lookupGid(map, ts.firstgid);
+      if (!probe || !probe.img) {
+        need.add(ts.imageKey ? ts.imageKey + ".png" : ts.tsxKey + ".tsx");
+      }
+    }
+    if (need.size === 0) el.innerHTML = `<span class="ok">✓ all tile art loaded</span>`;
+    else el.innerHTML = `<span class="warn">drop art for:</span> ` +
+      [...need].slice(0, 12).map((s) => `<code>${s}</code>`).join(" ") +
+      (need.size > 12 ? ` +${need.size - 12} more` : "");
+  }
+
+  function bindDial(id, key, fmt) {
+    const slider = document.getElementById(id);
+    const out = document.getElementById(id + "-val");
+    const apply = () => {
+      dials[key] = parseFloat(slider.value);
+      if (key !== "zoom") { colorEpoch++; tileCache.clear(); }
+      if (out) out.textContent = fmt ? fmt(dials[key]) : dials[key];
+      needsRedraw = true;
+    };
+    slider.addEventListener("input", apply);
+    apply();
+  }
+
+  function bindUI() {
+    bindDial("dial-order", "order", (v) => v < 0.45 ? "order" : v > 0.55 ? "chaos" : "—");
+    bindDial("dial-imag", "imag", (v) => v < 0.05 ? "ordinary" : Math.round(v * 100) + "%");
+    bindDial("dial-fear", "fear", (v) => v < 0.05 ? "relaxed" : Math.round(v * 100) + "%");
+    bindDial("dial-memory", "memory", (v) => Math.round(v * 100) + "%");
+    bindDial("dial-zoom", "zoom", (v) => Math.round(v) + "× tiles");
+
+    const dz = document.getElementById("dropzone");
+    ["dragenter", "dragover"].forEach((e) => dz.addEventListener(e, (ev) => {
+      ev.preventDefault(); dz.classList.add("hover");
+    }));
+    ["dragleave", "drop"].forEach((e) => dz.addEventListener(e, (ev) => {
+      ev.preventDefault(); dz.classList.remove("hover");
+    }));
+    dz.addEventListener("drop", (ev) => ingestFiles(ev.dataTransfer.files));
+    document.getElementById("file-input").addEventListener("change", (ev) => ingestFiles(ev.target.files));
+
+    // Whole-window drop as well, so users can drop anywhere.
+    window.addEventListener("dragover", (e) => e.preventDefault());
+    window.addEventListener("drop", (e) => { e.preventDefault(); ingestFiles(e.dataTransfer.files); });
+
+    // Pan: drag the canvas.
+    let dragging = false, lx = 0, ly = 0;
+    canvas.addEventListener("pointerdown", (e) => {
+      dragging = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const px = 320 / dials.zoom;
+      const scale = canvas.clientWidth / 320;
+      camX -= (e.clientX - lx) / (px * scale);
+      camY -= (e.clientY - ly) / (px * scale);
+      lx = e.clientX; ly = e.clientY; needsRedraw = true;
+    });
+    canvas.addEventListener("pointerup", () => { dragging = false; });
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") { camX -= 1; needsRedraw = true; }
+      if (e.key === "ArrowRight") { camX += 1; needsRedraw = true; }
+      if (e.key === "ArrowUp") { camY -= 1; needsRedraw = true; }
+      if (e.key === "ArrowDown") { camY += 1; needsRedraw = true; }
+    });
+
+    document.getElementById("btn-reset").addEventListener("click", () => {
+      dials.order = 0.5; dials.imag = 0; dials.fear = 0; dials.memory = 0; dials.zoom = 16;
+      camX = 0; camY = 0;
+      document.getElementById("dial-order").value = 0.5;
+      document.getElementById("dial-imag").value = 0;
+      document.getElementById("dial-fear").value = 0;
+      document.getElementById("dial-memory").value = 0;
+      document.getElementById("dial-zoom").value = 16;
+      ["dial-order", "dial-imag", "dial-fear", "dial-memory", "dial-zoom"]
+        .forEach((id) => document.getElementById(id).dispatchEvent(new Event("input")));
+      colorEpoch++; tileCache.clear(); needsRedraw = true;
+    });
+
+    document.getElementById("btn-anim").addEventListener("click", (e) => {
+      animate = !animate; e.target.textContent = animate ? "Pause" : "Play"; needsRedraw = true;
+    });
+
+    document.getElementById("btn-shot").addEventListener("click", () => {
+      const link = document.createElement("a");
+      link.download = `biome-${activeMapName}-${Date.now()}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    });
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────
+  function init() {
+    for (const nm in BUILTIN_MAPS) maps[nm] = parseTMX(BUILTIN_MAPS[nm], nm);
+    activeMapName = "grass farm";
+    bindUI();
+    buildMapTabs();
+    updateMissing();
+    requestAnimationFrame(loop);
+  }
+
+  init();
+})();
