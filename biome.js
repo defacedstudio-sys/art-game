@@ -699,12 +699,36 @@
       }
     }
     candidates.sort((a, b) => a.score - b.score);
-    for (const c of candidates.slice(0, 4)) {
+    let placed = 0;
+    for (const c of candidates) {
+      if (placed >= 4) break;
       // Ordamancers come in two animated variants — show both.
       const found = c.type === "ordamancer" ? pickByName("ordamancer", c.wx, c.wy) : findCreatureGid(c.type);
-      if (found) drawSprite(found.map, found.gid, c.sx, c.sy, px, t, c.wx, c.wy);
+      if (!found) continue;
+      const info = lookupGid(found.map, found.gid, false);
+      if (!info || !info.img) continue;
+      // Big sprites span several tiles — skip if ANY covered tile is water.
+      if (footprintHasWater(info, c.wx, c.wy)) continue;
+      drawSprite(found.map, found.gid, c.sx, c.sy, px, t, c.wx, c.wy);
+      placed++;
     }
     ctx.globalAlpha = 1;
+  }
+
+  // Does a creature sprite (native tw×th, bottom-centre anchored on the cell)
+  // overlap any water tile across its full footprint?
+  function footprintHasWater(info, wx, wy) {
+    const wc = info.tw / 20, hc = info.th / 20;     // size in tiles
+    const c0 = Math.floor(wx + (1 - wc) / 2);
+    const c1 = Math.ceil(wx + (1 + wc) / 2) - 1;
+    const r1 = wy, r0 = Math.floor(wy + 1 - hc);
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const m = pickMap(c, r);
+        if (isWaterTile(terrainInfoAt(m, c, r))) return true;
+      }
+    }
+    return false;
   }
 
   // Is this gid an animated creature (houndmare / lazeey / ordamancer)?
