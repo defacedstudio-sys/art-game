@@ -653,7 +653,7 @@
         const sx = i * px - fx + sliceShift, sy = j * px - fy;
         if (memVoid(wx, wy)) continue;
         const map = pickMap(wx, wy);
-        if (catAt(map, wx, wy) === "water") continue;        // nothing sits on water
+        if (isWaterTile(terrainInfoAt(map, wx, wy))) continue; // nothing sits on water
         const lx = ((wx % map.W) + map.W) % map.W;
         const ly = ((wy % map.H) + map.H) % map.H;
         for (const g of objectsAt(map, lx, ly)) {
@@ -686,9 +686,9 @@
           if (!isCreatureGid(map, g)) { blocked = true; break; }
         }
         if (blocked) continue;
-        // No creatures on water (or watery soil/log tiles).
-        const cat = catAt(map, wx, wy);
-        if (cat === "water" || isLog(cat)) continue;
+        // No creatures on water (sampled) or log/soil tiles.
+        const tinfo = terrainInfoAt(map, wx, wy);
+        if (isWaterTile(tinfo) || isLog(tinfo ? tinfo.category : "generic")) continue;
 
         let type = null;
         if (hash(wx, wy, 53) < houndP) type = "houndmare";
@@ -718,6 +718,31 @@
   function catAt(map, wx, wy) {
     const info = lookupGid(map, terrainGid(map, wx, wy));
     return info ? info.category : "generic";
+  }
+  const terrainInfoAt = (map, wx, wy) => lookupGid(map, terrainGid(map, wx, wy));
+
+  // Detect water by sampling a tile's average colour (blue/teal). This
+  // catches watery tiles in ANY tileset — e.g. the beach map's blue sea,
+  // which isn't categorised as "water" — so nothing spawns on them.
+  const _waterCache = new Map();
+  const _sampC = document.createElement("canvas");
+  _sampC.width = _sampC.height = 1;
+  const _sampX = _sampC.getContext("2d", { willReadFrequently: true });
+  function isWaterTile(info) {
+    if (!info || !info.img) return false;
+    const key = info.ts.firstgid + ":" + info.local;
+    let v = _waterCache.get(key);
+    if (v !== undefined) return v;
+    const sx = (info.local % info.cols) * info.tw;
+    const sy = Math.floor(info.local / info.cols) * info.th;
+    try {
+      _sampX.clearRect(0, 0, 1, 1);
+      _sampX.drawImage(info.img, sx, sy, info.tw, info.th, 0, 0, 1, 1);
+      const d = _sampX.getImageData(0, 0, 1, 1).data;
+      v = d[3] > 40 && d[0] < d[1] - 8 && d[0] < d[2] - 8 && d[2] > 70 && d[1] > 60;
+    } catch (e) { v = false; }
+    _waterCache.set(key, v);
+    return v;
   }
 
   let purpleCache;
