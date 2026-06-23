@@ -215,7 +215,6 @@
   <div class="wrap">
     <!-- Stage -->
     <div class="stage">
-      <div class="map-tabs" id="map-tabs"></div>
       <div id="dropzone">
         <canvas id="biome-canvas"></canvas>
       </div>
@@ -231,7 +230,7 @@
     <aside class="panel">
       <a class="back" href="index.html">← Studio</a>
       <h1>Biome <span>Adjuster</span></h1>
-      <p class="sub">Tiled maps split into 20×20 tiles, re-imagined in real time. Drag the canvas to pan.</p>
+      <p class="sub">All four maps form one world, split into 20×20 tiles and re-imagined in real time as the biomes interact. Drag the canvas to pan.</p>
 
       <div class="dial">
         <div class="dial-head"><label>Order ↔ Chaos</label><span class="val" id="dial-order-val"></span></div>
@@ -271,10 +270,11 @@
       </div>
 
       <p class="hint">
-        <b>Order</b> snaps tiles to match neighbours; <b>Chaos</b> scatters them.
-        <b>Imaginative</b> pushes hues to mixed pastels. <b>Fear</b> grows purple,
-        greens the water, and summons houndmares &amp; lazeey bom. <b>Memory</b>
-        leaves dream-trails. <b>Zoom</b> pulls back from 16 to 100 tiles across.
+        <b>Order</b> keeps biomes in clean separate regions; <b>Chaos</b> intermixes
+        them tile-by-tile so they bleed into each other. <b>Imaginative</b> pushes
+        hues to mixed pastels. <b>Fear</b> grows purple across every biome, greens
+        the water, and summons houndmares &amp; lazeey bom. <b>Memory</b> leaves
+        dream-trails. <b>Zoom</b> pulls back from 16 to 100 tiles across.
       </p>
     </aside>
   </div>

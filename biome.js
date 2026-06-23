@@ -259,7 +259,6 @@
   const images = {};   // basename(lower) -> HTMLImageElement
   const tsxDefs = {};  // basename(lower) -> { imageFile, tw, th, cols, count }
   const maps = {};     // displayName -> parsed map object
-  let activeMapName = null;
 
   // ── Parsing ──────────────────────────────────────────────────────
   const parser = new DOMParser();
@@ -459,31 +458,41 @@
     return null;
   }
 
-  function drawSprite(map, gid, x, y, px, t, jitterSeed) {
+  // Draw an object/creature — ONLY if its real art is loaded. No
+  // placeholder blobs, no bouncing: if the sprite isn't available, the
+  // tile simply isn't drawn.
+  function drawSprite(map, gid, x, y, px) {
     const info = lookupGid(map, gid);
-    const bob = animate ? Math.sin(t * 0.004 + jitterSeed) * px * 0.06 : 0;
-    if (info && info.img) {
-      const sx = (info.local % info.cols) * info.tw;
-      const sy = Math.floor(info.local / info.cols) * info.th;
-      ctx.drawImage(info.img, sx, sy, info.tw, info.th, x, y + bob, Math.ceil(px), Math.ceil(px));
-    } else if (info) {
-      // No art — draw a little category-coloured creature blob.
-      const [h, s, l] = CAT_HSL[info.category] || CAT_HSL.creature;
-      ctx.fillStyle = `hsl(${h},${s}%,${l}%)`;
-      const r = px * 0.34;
-      ctx.beginPath();
-      ctx.arc(x + px / 2, y + px / 2 + bob, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#0008";
-      ctx.fillRect(x + px * 0.36, y + px * 0.4 + bob, px * 0.08, px * 0.08);
-      ctx.fillRect(x + px * 0.56, y + px * 0.4 + bob, px * 0.08, px * 0.08);
-    }
+    if (!info || !info.img) return;
+    const sx = (info.local % info.cols) * info.tw;
+    const sy = Math.floor(info.local / info.cols) * info.th;
+    ctx.drawImage(info.img, sx, sy, info.tw, info.th, x, y, Math.ceil(px), Math.ceil(px));
+  }
+
+  // ── Unified world ────────────────────────────────────────────────
+  // All loaded maps are one world. Each cell belongs to a biome (a source
+  // map); the Order↔Chaos dial decides whether biomes sit in clean
+  // contiguous regions (order) or intermix tile-by-tile (chaos) — that
+  // intermixing IS the biomes interacting.
+  let MAPS = [];
+  function refreshMapList() { MAPS = Object.values(maps); }
+
+  function pickMap(wx, wy) {
+    if (MAPS.length <= 1) return MAPS[0];
+    const order = Math.max(0, (0.5 - dials.order) * 2);
+    const chaos = Math.max(0, (dials.order - 0.5) * 2);
+    // Region size grows with order → larger, cleaner biome patches.
+    const bs = Math.max(3, Math.round(7 + order * 38));
+    const bx = Math.floor(wx / bs), by = Math.floor(wy / bs);
+    let idx = (hash(bx, by, 101) * MAPS.length) | 0;       // contiguous region
+    if (chaos > 0 && hash(wx, wy, 107) < chaos)
+      idx = (hash(wx, wy, 103) * MAPS.length) | 0;         // intermix per tile
+    return MAPS[idx];
   }
 
   // ── Render ───────────────────────────────────────────────────────
   function render(t) {
-    const map = maps[activeMapName];
-    if (!map) return;
+    if (!MAPS.length) return;
 
     // Memory: partial clear leaves dreamy afterimages.
     const clearA = lerp(1, 0.10, dials.memory);
@@ -497,62 +506,54 @@
     const ox = Math.floor(camX), oy = Math.floor(camY);
     const fx = (camX - ox) * px, fy = (camY - oy) * px;
     const tileAlpha = lerp(1, 0.62, dials.memory);
+    const purple = findPurpleGid();
 
-    // Terrain pass.
+    // Terrain pass — biome chosen per cell, so regions border & blend.
     for (let j = -1; j < down; j++) {
       for (let i = -1; i <= across; i++) {
         const wx = ox + i, wy = oy + j;
         const sx = i * px - fx, sy = j * px - fy;
 
+        const map = pickMap(wx, wy);
         let gid = terrainGid(map, wx, wy);
         let info = lookupGid(map, gid);
         let category = info ? info.category : "generic";
 
-        // Fear: purple creep — convert some terrain to purple tiles.
+        // Fear: purple creep spreads across every biome.
         if (dials.fear > 0 && category !== "purple" &&
             hash(wx, wy, 91) < dials.fear * 0.4) {
-          const p = findPurpleGid(map);
-          if (p) { gid = p.gid; info = lookupGid(p.map, p.gid); category = "purple"; }
-          else category = "purple";
+          category = "purple";
+          if (purple) info = lookupGid(purple.map, purple.gid);
         }
 
         ctx.globalAlpha = tileAlpha;
         if (info && info.img) {
           const sig = tintSig(category, toneBand(wx, wy), t);
-          const tile = tintedTile(info, sig);
-          ctx.drawImage(tile, sx, sy, Math.ceil(px), Math.ceil(px));
+          ctx.drawImage(tintedTile(info, sig), sx, sy, Math.ceil(px), Math.ceil(px));
         } else {
           fallbackBlock(category, wx, wy, sx, sy, px, t);
         }
       }
     }
 
-    // Object + creature pass (only when zoomed in enough to matter).
+    // Object + creature pass (real art only).
     ctx.globalAlpha = tileAlpha;
     for (let j = -1; j < down; j++) {
       for (let i = -1; i <= across; i++) {
         const wx = ox + i, wy = oy + j;
         const sx = i * px - fx, sy = j * px - fy;
+        const map = pickMap(wx, wy);
         const lx = ((wx % map.W) + map.W) % map.W;
         const ly = ((wy % map.H) + map.H) % map.H;
 
         for (const g of objectsAt(map, lx, ly))
-          drawSprite(map, g, sx, sy, px, t, wx * 1.7 + wy);
+          drawSprite(map, g, sx, sy, px);
 
-        // Fear: extra houndmares & lazeey bom inhabitants.
-        if (dials.fear > 0.05) {
-          const r = hash(wx, wy, 53);
-          if (r < dials.fear * 0.16) {
-            const want = hash(wx, wy, 61) < 0.5 ? "houndmare" : "lazeey";
-            const c = findCreatureGid(want) || { map, gid: 0 };
-            if (c.gid) drawSprite(c.map, c.gid, sx, sy, px, t, wx + wy * 2.3);
-            else {
-              ctx.fillStyle = want === "houndmare" ? "hsl(285,55%,40%)" : "hsl(85,55%,55%)";
-              ctx.beginPath();
-              ctx.arc(sx + px / 2, sy + px / 2, px * 0.3, 0, Math.PI * 2);
-              ctx.fill();
-            }
-          }
+        // Fear: more houndmares & lazeey bom inhabit the whole world.
+        if (dials.fear > 0.05 && hash(wx, wy, 53) < dials.fear * 0.16) {
+          const want = hash(wx, wy, 61) < 0.5 ? "houndmare" : "lazeey";
+          const c = findCreatureGid(want);
+          if (c) drawSprite(c.map, c.gid, sx, sy, px);
         }
       }
     }
@@ -560,7 +561,7 @@
   }
 
   let purpleCache;
-  function findPurpleGid(map) {
+  function findPurpleGid() {
     if (purpleCache !== undefined) return purpleCache;
     purpleCache = findGidByCategory("purple");
     return purpleCache;
@@ -619,7 +620,6 @@
         f.text().then((txt) => {
           const nm = stripExt(f.name);
           maps[nm] = parseTMX(txt, nm);
-          if (!activeMapName) activeMapName = nm;
           done();
         }).catch(done);
       } else done();
@@ -630,42 +630,27 @@
     purpleCache = undefined;
     tileCache.clear();
     colorEpoch++;
-    buildMapTabs();
+    refreshMapList();
     updateMissing();
     needsRedraw = true;
   }
 
   // ── UI ───────────────────────────────────────────────────────────
-  function buildMapTabs() {
-    const wrap = document.getElementById("map-tabs");
-    wrap.innerHTML = "";
-    for (const nm in maps) {
-      const b = document.createElement("button");
-      b.className = "tab" + (nm === activeMapName ? " active" : "");
-      b.textContent = nm;
-      b.onclick = () => {
-        activeMapName = nm; camX = 0; camY = 0;
-        purpleCache = undefined; buildMapTabs(); updateMissing(); needsRedraw = true;
-      };
-      wrap.appendChild(b);
-    }
-  }
-
   function updateMissing() {
-    const map = maps[activeMapName];
     const el = document.getElementById("missing");
-    if (!map) { el.textContent = ""; return; }
     const need = new Set();
-    for (const ts of map.tilesets) {
-      const probe = lookupGid(map, ts.firstgid);
-      if (!probe || !probe.img) {
-        need.add(ts.imageKey ? ts.imageKey + ".png" : ts.tsxKey + ".tsx");
+    for (const nm in maps) {
+      const map = maps[nm];
+      for (const ts of map.tilesets) {
+        const probe = lookupGid(map, ts.firstgid);
+        if (!probe || !probe.img)
+          need.add(ts.imageKey ? ts.imageKey + ".png" : ts.tsxKey + ".tsx");
       }
     }
     if (need.size === 0) el.innerHTML = `<span class="ok">✓ all tile art loaded</span>`;
-    else el.innerHTML = `<span class="warn">drop art for:</span> ` +
-      [...need].slice(0, 12).map((s) => `<code>${s}</code>`).join(" ") +
-      (need.size > 12 ? ` +${need.size - 12} more` : "");
+    else el.innerHTML = `<span class="warn">drop tileset art (.png/.tsx) to replace colour blocks — needs:</span> ` +
+      [...need].slice(0, 10).map((s) => `<code>${s}</code>`).join(" ") +
+      (need.size > 10 ? ` +${need.size - 10} more` : "");
   }
 
   function bindDial(id, key, fmt) {
@@ -743,7 +728,7 @@
 
     document.getElementById("btn-shot").addEventListener("click", () => {
       const link = document.createElement("a");
-      link.download = `biome-${activeMapName}-${Date.now()}.png`;
+      link.download = `biome-world-${Date.now()}.png`;
       link.href = canvas.toDataURL("image/png");
       link.click();
     });
@@ -752,9 +737,8 @@
   // ── Init ─────────────────────────────────────────────────────────
   function init() {
     for (const nm in BUILTIN_MAPS) maps[nm] = parseTMX(BUILTIN_MAPS[nm], nm);
-    activeMapName = "grass farm";
+    refreshMapList();
     bindUI();
-    buildMapTabs();
     updateMissing();
     requestAnimationFrame(loop);
   }
