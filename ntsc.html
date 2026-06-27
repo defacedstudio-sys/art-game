@@ -9,7 +9,6 @@
 
     :root {
       --bg: #0a0a0e;
-      --panel: #14141b;
       --panel-2: #1c1c26;
       --border: rgba(255,255,255,0.08);
       --text: #e8e8ec;
@@ -25,84 +24,34 @@
       color: var(--text);
     }
 
-    .app {
-      display: grid;
-      grid-template-columns: 380px 1fr;
-      height: 100vh;
-    }
-
-    /* ── Left control panel ── */
-    .panel {
-      background: var(--panel);
-      border-right: 1px solid var(--border);
-      overflow-y: auto;
-      padding: 18px 18px 40px;
-    }
-    .panel::-webkit-scrollbar { width: 10px; }
-    .panel::-webkit-scrollbar-thumb { background: #2a2a36; border-radius: 6px; }
-
-    .brand { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
-    .brand h1 { font-size: 1.15rem; font-weight: 800; letter-spacing: .02em; }
-    .brand .accent { color: var(--accent); }
-    .sub {
-      font-size: .72rem; color: var(--muted); line-height: 1.5; margin-bottom: 16px;
-    }
-    .sub a { color: var(--accent-2); text-decoration: none; }
-    .sub a:hover { text-decoration: underline; }
-
-    .toggles { display: flex; gap: 18px; margin-bottom: 14px; flex-wrap: wrap; }
-    .toggle { display: flex; align-items: center; gap: 7px; font-size: .82rem; cursor: pointer; user-select: none; }
-    .toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
-
-    .ctrl {
-      padding: 11px 0;
-      border-top: 1px solid var(--border);
-    }
-    .ctrl.disabled { opacity: .38; }
-    .ctrl-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 7px; }
-    .ctrl-head label { font-size: .84rem; font-weight: 600; }
-    .ctrl-val {
-      font-variant-numeric: tabular-nums;
-      font-size: .78rem; color: var(--accent-2);
-      background: var(--panel-2); padding: 2px 8px; border-radius: 6px;
-      min-width: 64px; text-align: right;
-    }
-    .ctrl-help { font-size: .68rem; color: var(--muted); line-height: 1.45; margin-top: 6px; }
-
-    input[type=range] {
-      -webkit-appearance: none; appearance: none;
-      width: 100%; height: 4px; border-radius: 3px;
-      background: #2c2c38; outline: none;
-    }
-    input[type=range]::-webkit-slider-thumb {
-      -webkit-appearance: none; appearance: none;
-      width: 16px; height: 16px; border-radius: 50%;
-      background: var(--accent); cursor: pointer; border: 2px solid #0a0a0e;
-      box-shadow: 0 0 0 1px var(--accent);
-    }
-    input[type=range]::-moz-range-thumb {
-      width: 16px; height: 16px; border-radius: 50%;
-      background: var(--accent); cursor: pointer; border: 2px solid #0a0a0e;
-    }
-    input[type=range]:disabled { opacity: .5; }
-
-    /* ── Right preview side ── */
     .stage {
+      max-width: 880px;
+      margin: 0 auto;
+      min-height: 100vh;
       display: flex; flex-direction: column;
-      min-width: 0; padding: 18px;
-      background:
-        radial-gradient(900px 600px at 60% 0%, #16131f 0%, #0a0a0e 70%);
+      padding: 22px 20px 40px;
+      gap: 16px;
     }
+
+    header h1 { font-size: 1.25rem; font-weight: 800; }
+    header h1 .accent { color: var(--accent); }
+    header p {
+      font-size: .76rem; color: var(--muted); line-height: 1.5; margin-top: 6px;
+    }
+    header a { color: var(--accent-2); text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+    .back { color: var(--muted); }
+
     .canvas-wrap {
-      flex: 1; min-height: 0;
+      flex: 1; min-height: 320px;
       display: flex; align-items: center; justify-content: center;
       border: 1px solid var(--border); border-radius: 14px;
       background: #050507;
-      overflow: hidden;
-      position: relative;
+      overflow: hidden; position: relative;
     }
+    .canvas-wrap.drag { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,110,240,.25) inset; }
     #preview {
-      max-width: 100%; max-height: 100%;
+      max-width: 100%; max-height: 70vh;
       image-rendering: pixelated;
       border-radius: 6px;
       box-shadow: 0 8px 40px rgba(0,0,0,.6);
@@ -114,25 +63,33 @@
       pointer-events: none;
     }
 
-    /* ── Toolbar ── */
-    .toolbar {
-      margin-top: 14px;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 12px 18px;
-      align-items: end;
+    /* preset chip */
+    .preset {
+      font-size: .7rem; color: var(--muted);
+      background: var(--panel-2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 9px 12px; line-height: 1.5;
     }
-    .field { display: flex; flex-direction: column; gap: 5px; }
-    .field > span { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-    .field input[type=number], .field select {
-      background: var(--panel-2); color: var(--text);
-      border: 1px solid var(--border); border-radius: 8px;
-      padding: 7px 9px; font-size: .85rem; width: 100%;
-    }
-    .checks { display: flex; gap: 16px; align-items: center; }
-    .checks .toggle { font-size: .8rem; }
+    .preset b { color: var(--text); font-weight: 600; }
 
-    .btnrow { display: flex; gap: 10px; flex-wrap: wrap; grid-column: 1 / -1; }
+    /* export bar */
+    .bar {
+      display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: flex-end;
+      border-top: 1px solid var(--border); padding-top: 16px;
+    }
+    .group { display: flex; flex-direction: column; gap: 6px; }
+    .group > span.lbl { font-size: .66rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .sizes { display: flex; align-items: center; gap: 8px; }
+    .sizes input[type=number] {
+      width: 84px; background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px; padding: 8px 9px; font-size: .85rem;
+    }
+    .sizes .x { color: var(--muted); }
+    .lock { display: flex; align-items: center; gap: 6px; font-size: .76rem; color: var(--muted); cursor: pointer; user-select: none; }
+    .lock input { accent-color: var(--accent); }
+
+    .scaleBtns { display: flex; gap: 6px; }
+    .scaleBtns button { padding: 8px 11px; }
+
     button {
       background: var(--panel-2); color: var(--text);
       border: 1px solid var(--border); border-radius: 9px;
@@ -142,76 +99,72 @@
     button:hover { border-color: var(--accent); }
     button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     button.primary:hover { background: #8e80ff; }
-    button.ghost { background: transparent; }
 
-    .back { font-size: .72rem; color: var(--muted); text-decoration: none; }
-    .back:hover { color: var(--text); }
+    .spacer { flex: 1; }
+    #sizeNote { font-size: .68rem; color: var(--muted); width: 100%; }
   </style>
 </head>
 <body>
-  <div class="app">
-
-    <!-- ── Controls ── -->
-    <aside class="panel">
-      <div class="brand">
-        <h1>NTSC&nbsp;<span class="accent">/</span>&nbsp;VHS Lab</h1>
-      </div>
-      <p class="sub">
-        A browser recreation of the
-        <a href="https://github.com/JargeZ/ntscqt" target="_blank" rel="noopener">JargeZ/ntscqt</a>
-        look — same artefacts, plain-English labels, and no grey streak down the left edge.
-        Hover a label to see its original name. <a href="index.html" class="back">← back to studio</a>
+  <div class="stage">
+    <header>
+      <h1>NTSC&nbsp;<span class="accent">/</span>&nbsp;VHS Lab</h1>
+      <p>
+        Drops any image through a fixed analogue-TV simulator — the exact
+        <a href="https://github.com/JargeZ/ntscqt" target="_blank" rel="noopener">ntscqt</a>
+        preset from the reference (seed&nbsp;44), with no grey left-edge streak.
+        No dials: just load a picture and export it at the size you want.
+        <a href="index.html" class="back">← back to studio</a>
       </p>
+    </header>
 
-      <div class="toggles" id="toggles"></div>
-      <div id="sliders"></div>
-    </aside>
+    <div class="canvas-wrap">
+      <canvas id="preview"></canvas>
+      <div class="hint">Drag &amp; drop an image here, or use “Open image”.</div>
+    </div>
 
-    <!-- ── Preview + toolbar ── -->
-    <section class="stage">
-      <div class="canvas-wrap">
-        <canvas id="preview"></canvas>
-        <div class="hint">Drag &amp; drop an image here, or use “Open image”.</div>
+    <div class="preset">
+      <b>Baked-in preset:</b> Composite preemphasis 1.84746 · Edge wave 4 · Ringing 6 ·
+      Color bleed 1/1 · Chroma noise 241 · Chroma phase 3 · Chroma loss 225 · Video noise 343 ·
+      Head switching off · VHS emulating off · Seed 44.
+    </div>
+
+    <div class="bar">
+      <div class="group">
+        <span class="lbl">Image</span>
+        <button id="openImage">Open image…</button>
       </div>
 
-      <div class="toolbar">
-        <div class="field">
-          <span>Render height (px)</span>
-          <input type="number" id="renderHeight" min="64" max="1200" step="10" />
-        </div>
-        <div class="field">
-          <span>Seed</span>
-          <div style="display:flex; gap:8px;">
-            <input type="number" id="seed" min="0" step="1" />
-            <button id="randomSeed" class="ghost" title="Randomise seed">🎲</button>
-          </div>
-        </div>
-        <div class="field">
-          <span>Export scale (Aseprite-style)</span>
-          <select id="exportScale">
-            <option value="1">1× (native)</option>
-            <option value="2" selected>2× nearest-neighbour</option>
-            <option value="3">3× nearest-neighbour</option>
-            <option value="4">4× nearest-neighbour</option>
-            <option value="6">6× nearest-neighbour</option>
-            <option value="8">8× nearest-neighbour</option>
-          </select>
-        </div>
-        <div class="field">
-          <span>View</span>
-          <div class="checks">
-            <label class="toggle"><input type="checkbox" id="effectOn" /><span>Effect on</span></label>
-            <label class="toggle"><input type="checkbox" id="compare" /><span>Compare</span></label>
-          </div>
-        </div>
-
-        <div class="btnrow">
-          <button id="targetPreset">Load target preset (seed 44)</button>
-          <button id="openImage">Open image…</button>
-          <button id="savePNG" class="primary">Save PNG ⤓</button>
+      <div class="group">
+        <span class="lbl">Export size (px)</span>
+        <div class="sizes">
+          <input type="number" id="exW" min="1" step="1" />
+          <span class="x">×</span>
+          <input type="number" id="exH" min="1" step="1" />
+          <label class="lock"><input type="checkbox" id="lockAspect" checked />lock ratio</label>
         </div>
       </div>
-    </section>
+
+      <div class="group">
+        <span class="lbl">Quick scale (crisp)</span>
+        <div class="scaleBtns">
+          <button data-scale="1">1×</button>
+          <button data-scale="2">2×</button>
+          <button data-scale="3">3×</button>
+          <button data-scale="4">4×</button>
+          <button data-scale="6">6×</button>
+          <button data-scale="8">8×</button>
+        </div>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="group">
+        <span class="lbl">&nbsp;</span>
+        <button id="savePNG" class="primary">Save PNG ⤓</button>
+      </div>
+
+      <p id="sizeNote"></p>
+    </div>
   </div>
 
   <input type="file" id="fileInput" accept="image/*" style="display:none" />

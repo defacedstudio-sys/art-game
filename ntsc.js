@@ -45,65 +45,30 @@
     return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
   }
 
-  // ── Control definitions ─────────────────────────────────────────────
-  // `orig` is the label used in the real ntscqt; `gate` (if set) means the
-  // control only does anything while that toggle is on (matching the app).
-  const CONTROLS = [
-    { id: "preemphasis",  label: "Edge sharpening",   orig: "Composite preemphasis",
-      min: 0, max: 8, step: 0.001, value: 1.84746,
-      help: "High-frequency boost. Sharpens edges and pulls colour fringing out of them." },
-    { id: "vhsSharpen",   label: "VHS sharpen",       orig: "VHS out sharpen", gate: "vhs",
-      min: 1, max: 5, step: 0.001, value: 2.46772,
-      help: "Extra unsharp pass on luma. Only active while VHS emulating is on." },
-    { id: "edgeWave",     label: "Edge wobble",       orig: "Edge wave",
-      min: 0, max: 10, step: 1, value: 4,
-      help: "Wavy horizontal displacement of each scan-line — the classic warped-tape wobble." },
-    { id: "ringingPower", label: "Ringing / ripples", orig: "Ringing power",
-      min: 2, max: 7, step: 1, value: 6,
-      help: "Sharpness of the band-limit. Higher = stronger ghost ripples radiating from bright edges." },
-    { id: "bleedH",       label: "Colour bleed →",    orig: "Color bleed horiz",
-      min: 0, max: 8, step: 1, value: 1,
-      help: "Horizontal smear of the colour channel." },
-    { id: "bleedV",       label: "Colour bleed ↓",    orig: "Color bleed vert",
-      min: 0, max: 8, step: 1, value: 1,
-      help: "Vertical smear of the colour channel, line to line." },
-    { id: "chromaNoise",  label: "Colour noise",      orig: "Video chroma noise",
-      min: 0, max: 16384, step: 1, value: 241,
-      help: "Random speckle in the colour channel only." },
-    { id: "chromaPhase",  label: "Colour phase jitter", orig: "Video chroma phase noise",
-      min: 0, max: 50, step: 1, value: 3,
-      help: "Hue wobbles slightly from line to line as the subcarrier phase drifts." },
-    { id: "chromaLoss",   label: "Colour drop-out",   orig: "Video chroma loss",
-      min: 0, max: 10000, step: 1, value: 225,
-      help: "Patches where the colour briefly cuts out, leaving grey." },
-    { id: "videoNoise",   label: "Luma noise",        orig: "Video noise",
-      min: 0, max: 4200, step: 1, value: 343,
-      help: "Random brightness grain across the whole picture." },
-    { id: "headSpeed",    label: "Head-switch drift", orig: "Head switch move speed", gate: "head",
-      min: 0, max: 100, step: 1, value: 0,
-      help: "Speed of the torn band at the bottom. Only active while Head switching is on." },
-  ];
-
-  const TOGGLES = [
-    { id: "head", label: "Head switching", value: false,
-      help: "Torn / shifted band along the bottom of the frame." },
-    { id: "vhs",  label: "VHS emulating",  value: false,
-      help: "Tape-style luma low-pass plus the VHS sharpen pass." },
-  ];
+  // ── FIXED PRESET ─────────────────────────────────────────────────────
+  // The exact ntscqt settings from the reference screenshot (seed 44).
+  // These are baked in — there are no dials. Change them here only.
+  const PRESET = {
+    preemphasis: 1.84746,   // Composite preemphasis
+    vhsSharpen:  2.46772,   // VHS out sharpen   (only with vhs:true)
+    edgeWave:    4,         // Edge wave
+    ringingPower: 6,        // Ringing power
+    bleedH:      1,         // Color bleed horiz
+    bleedV:      1,         // Color bleed vert
+    chromaNoise: 241,       // Video chroma noise
+    chromaPhase: 3,         // Video chroma phase noise
+    chromaLoss:  225,       // Video chroma loss
+    videoNoise:  343,       // Video noise
+    headSpeed:   0,         // Head switch move speed (only with head:true)
+  };
+  const TOG = { head: false, vhs: false };  // both off, exactly as the screenshot
+  const SEED = 44;
+  const RENDER_HEIGHT = 600;                 // the look is baked at TV resolution
 
   // ── State ───────────────────────────────────────────────────────────
   const state = {
-    params: {},
-    toggles: {},
-    seed: 44,
-    renderHeight: 600,
-    effectOn: true,
-    compare: false,
-    exportScale: 2,
     source: null,     // HTMLCanvasElement holding the original image at native size
   };
-  CONTROLS.forEach((c) => (state.params[c.id] = c.value));
-  TOGGLES.forEach((t) => (state.toggles[t.id] = t.value));
 
   // ─────────────────────────────────────────────────────────────────────
   //  COLOUR MATHS  (standard FCC YIQ, working in 0..255)
@@ -133,10 +98,10 @@
   //  sides of an edge and there is no left/right bias (no edge streak).
   // ─────────────────────────────────────────────────────────────────────
   function applyRinging(comp, W, power) {
-    const r = 0.80 + ((power - 2) / 5) * 0.175;   // 0.80 … 0.975
-    const w0 = (2 * Math.PI) / 15;                 // ripple period ≈ 15 px
+    const r = 0.90 + ((power - 2) / 5) * 0.072;    // 0.90 … 0.972 (decay length)
+    const w0 = (2 * Math.PI) / 5;                   // FINE ripples, period ≈ 5 px
     const c1 = 2 * r * Math.cos(w0), c2 = r * r;
-    const gain = 0.55;
+    const gain = 0.15;                              // subtle, ±~13 % swing at an edge
     const fwd = ringPass(comp, W, c1, c2, +1);
     const bwd = ringPass(comp, W, c1, c2, -1);
     for (let x = 0; x < W; x++) comp[x] += gain * 0.5 * (fwd[x] + bwd[x]);
@@ -454,18 +419,17 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  RENDER ORCHESTRATION
+  //  RENDER  — always the fixed preset, computed once per loaded image.
   // ═══════════════════════════════════════════════════════════════════
   const previewCanvas = document.getElementById("preview");
   const pctx = previewCanvas.getContext("2d");
-  let working = null;     // last processed ImageData (for export)
+  let working = null;     // last processed ImageData (the baked NTSC frame)
   let workW = 0, workH = 0;
-  let pending = null;
 
   function scaledSource() {
-    // Scale the source down to the chosen render height (preserve aspect).
+    // Bake the look at TV resolution (RENDER_HEIGHT), preserving aspect.
     const s = state.source;
-    const h = Math.max(64, Math.min(1200, state.renderHeight | 0));
+    const h = Math.min(RENDER_HEIGHT, Math.max(64, s.height));
     const w = Math.max(1, Math.round((s.width * h) / s.height));
     const c = document.createElement("canvas");
     c.width = w; c.height = h;
@@ -479,61 +443,42 @@
     if (!state.source) return;
     const srcImg = scaledSource();
     workW = srcImg.width; workH = srcImg.height;
-
-    if (state.effectOn) {
-      working = applyNTSC(srcImg, state.params, state.toggles, state.seed);
-    } else {
-      working = srcImg;
-    }
+    working = applyNTSC(srcImg, PRESET, TOG, SEED);
 
     previewCanvas.width = workW;
     previewCanvas.height = workH;
     pctx.imageSmoothingEnabled = false;
+    pctx.putImageData(working, 0, 0);
 
-    if (state.compare && state.effectOn) {
-      // left half original, right half processed
-      pctx.putImageData(srcImg, 0, 0);
-      const right = pctx.createImageData(workW, workH);
-      right.data.set(working.data);
-      pctx.putImageData(working, 0, 0, (workW >> 1), 0, workW - (workW >> 1), workH);
-      // redraw original on the left half
-      pctx.putImageData(srcImg, 0, 0, 0, 0, workW >> 1, workH);
-      // divider
-      pctx.fillStyle = "rgba(255,255,255,0.6)";
-      pctx.fillRect((workW >> 1) - 1, 0, 2, workH);
-    } else {
-      pctx.putImageData(working, 0, 0);
-    }
-  }
-
-  // Debounced render so dragging stays smooth.
-  function scheduleRender() {
-    if (pending) cancelAnimationFrame(pending);
-    pending = requestAnimationFrame(() => { pending = null; render(); });
+    // refresh the export-size fields to the new native size
+    if (exW && !exW._touched) exW.value = workW;
+    if (exH && !exH._touched) exH.value = workH;
+    updateSizeNote();
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  EXPORT — Aseprite-style integer upscaler (nearest-neighbour)
+  //  EXPORT — Aseprite-style nearest-neighbour resize to any size.
   // ═══════════════════════════════════════════════════════════════════
-  function exportPNG() {
+  function exportPNG(targetW, targetH) {
     if (!working) return;
-    const scale = Math.max(1, state.exportScale | 0);
+    targetW = Math.max(1, Math.round(targetW));
+    targetH = Math.max(1, Math.round(targetH));
+
     const src = document.createElement("canvas");
     src.width = workW; src.height = workH;
     src.getContext("2d").putImageData(working, 0, 0);
 
     const out = document.createElement("canvas");
-    out.width = workW * scale;
-    out.height = workH * scale;
+    out.width = targetW; out.height = targetH;
     const g = out.getContext("2d");
     g.imageSmoothingEnabled = false;        // crisp pixels, exactly like Aseprite
-    g.drawImage(src, 0, 0, out.width, out.height);
+    g.drawImage(src, 0, 0, targetW, targetH);
 
     out.toBlob((blob) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `ntsc_${workW * scale}x${workH * scale}.png`;
+      a.download = `ntsc_${targetW}x${targetH}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -542,133 +487,54 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  UI WIRING
+  //  MINIMAL UI  — open image, choose export size, save. No dials.
   // ═══════════════════════════════════════════════════════════════════
-  const slidersHost = document.getElementById("sliders");
-  const togglesHost = document.getElementById("toggles");
-  const valueEls = {};
+  const exW = document.getElementById("exW");
+  const exH = document.getElementById("exH");
+  const lockChk = document.getElementById("lockAspect");
+  const sizeNote = document.getElementById("sizeNote");
 
-  function fmt(c, v) {
-    return c.step < 1 ? v.toFixed(5) : String(v | 0);
+  function aspect() { return workH ? workW / workH : 1; }
+  function updateSizeNote() {
+    if (!sizeNote) return;
+    const w = parseInt(exW.value, 10) || workW;
+    const h = parseInt(exH.value, 10) || workH;
+    const mult = workW ? (w / workW) : 1;
+    const clean = Math.abs(mult - Math.round(mult)) < 0.01 && Math.round(mult) >= 1;
+    sizeNote.textContent =
+      `Source bakes at ${workW}×${workH}. Export ${w}×${h}` +
+      (clean ? ` (${Math.round(mult)}× — perfectly crisp).` : ` (nearest-neighbour).`);
   }
 
-  CONTROLS.forEach((c) => {
-    const wrap = document.createElement("div");
-    wrap.className = "ctrl";
-    wrap.dataset.id = c.id;
+  exW.addEventListener("input", () => {
+    exW._touched = true;
+    if (lockChk.checked) { exH.value = Math.max(1, Math.round((parseInt(exW.value, 10) || 0) / aspect())); }
+    updateSizeNote();
+  });
+  exH.addEventListener("input", () => {
+    exH._touched = true;
+    if (lockChk.checked) { exW.value = Math.max(1, Math.round((parseInt(exH.value, 10) || 0) * aspect())); }
+    updateSizeNote();
+  });
 
-    const head = document.createElement("div");
-    head.className = "ctrl-head";
-    const lab = document.createElement("label");
-    lab.textContent = c.label;
-    lab.title = `ntscqt: “${c.orig}”`;
-    const val = document.createElement("span");
-    val.className = "ctrl-val";
-    val.textContent = fmt(c, c.value);
-    valueEls[c.id] = val;
-    head.appendChild(lab);
-    head.appendChild(val);
-
-    const input = document.createElement("input");
-    input.type = "range";
-    input.min = c.min; input.max = c.max; input.step = c.step; input.value = c.value;
-    input.addEventListener("input", () => {
-      state.params[c.id] = parseFloat(input.value);
-      val.textContent = fmt(c, state.params[c.id]);
-      scheduleRender();
+  // quick integer-scale buttons
+  document.querySelectorAll("[data-scale]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const s = parseInt(btn.dataset.scale, 10);
+      exW.value = workW * s; exH.value = workH * s;
+      exW._touched = exH._touched = true;
+      updateSizeNote();
     });
-
-    const help = document.createElement("p");
-    help.className = "ctrl-help";
-    help.textContent = c.help;
-
-    wrap.appendChild(head);
-    wrap.appendChild(input);
-    wrap.appendChild(help);
-    slidersHost.appendChild(wrap);
-    wrap._input = input;
   });
 
-  TOGGLES.forEach((t) => {
-    const lab = document.createElement("label");
-    lab.className = "toggle";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = t.value;
-    cb.addEventListener("change", () => {
-      state.toggles[t.id] = cb.checked;
-      refreshGates();
-      scheduleRender();
-    });
-    const span = document.createElement("span");
-    span.textContent = t.label;
-    span.title = t.help;
-    lab.appendChild(cb);
-    lab.appendChild(span);
-    togglesHost.appendChild(lab);
-    t._cb = cb;
+  document.getElementById("savePNG").addEventListener("click", () => {
+    exportPNG(parseInt(exW.value, 10) || workW, parseInt(exH.value, 10) || workH);
   });
-
-  // Grey-out gated controls when their toggle is off (cosmetic, like the app —
-  // except the picture itself never gets a grey streak).
-  function refreshGates() {
-    CONTROLS.forEach((c) => {
-      if (!c.gate) return;
-      const wrap = slidersHost.querySelector(`[data-id="${c.id}"]`);
-      const enabled = state.toggles[c.gate];
-      wrap.classList.toggle("disabled", !enabled);
-      wrap._input.disabled = !enabled;
-    });
-  }
-
-  function setControlValue(id, v) {
-    state.params[id] = v;
-    const wrap = slidersHost.querySelector(`[data-id="${id}"]`);
-    const c = CONTROLS.find((x) => x.id === id);
-    wrap._input.value = v;
-    valueEls[id].textContent = fmt(c, v);
-  }
-
-  // Toolbar elements
-  const seedInput = document.getElementById("seed");
-  const heightInput = document.getElementById("renderHeight");
-  const effectChk = document.getElementById("effectOn");
-  const compareChk = document.getElementById("compare");
-  const scaleSel = document.getElementById("exportScale");
-
-  seedInput.value = state.seed;
-  heightInput.value = state.renderHeight;
-  effectChk.checked = state.effectOn;
-  compareChk.checked = state.compare;
-
-  seedInput.addEventListener("input", () => { state.seed = parseInt(seedInput.value || "0", 10) || 0; scheduleRender(); });
-  heightInput.addEventListener("input", () => { state.renderHeight = parseInt(heightInput.value || "600", 10) || 600; scheduleRender(); });
-  effectChk.addEventListener("change", () => { state.effectOn = effectChk.checked; scheduleRender(); });
-  compareChk.addEventListener("change", () => { state.compare = compareChk.checked; scheduleRender(); });
-  scaleSel.addEventListener("change", () => { state.exportScale = parseInt(scaleSel.value, 10); });
-
-  document.getElementById("randomSeed").addEventListener("click", () => {
-    state.seed = (Math.random() * 100000) | 0;
-    seedInput.value = state.seed;
-    scheduleRender();
-  });
-
-  document.getElementById("targetPreset").addEventListener("click", () => {
-    CONTROLS.forEach((c) => setControlValue(c.id, c.value));
-    TOGGLES.forEach((t) => { state.toggles[t.id] = t.value; t._cb.checked = t.value; });
-    state.seed = 44; seedInput.value = 44;
-    state.renderHeight = 600; heightInput.value = 600;
-    refreshGates();
-    scheduleRender();
-  });
-
-  document.getElementById("savePNG").addEventListener("click", exportPNG);
 
   // Image loading
   const fileInput = document.getElementById("fileInput");
   document.getElementById("openImage").addEventListener("click", () => fileInput.click());
-  fileInput.addEventListener("change", () => {
-    const f = fileInput.files && fileInput.files[0];
+  function loadFile(f) {
     if (!f) return;
     const img = new Image();
     img.onload = () => {
@@ -676,22 +542,24 @@
       c.width = img.naturalWidth; c.height = img.naturalHeight;
       c.getContext("2d").drawImage(img, 0, 0);
       state.source = c;
-      scheduleRender();
+      exW._touched = exH._touched = false;   // re-fit export size to new image
+      render();
     };
     img.src = URL.createObjectURL(f);
-  });
+  }
+  fileInput.addEventListener("change", () => loadFile(fileInput.files && fileInput.files[0]));
+
   // Drag & drop onto the preview
-  previewCanvas.addEventListener("dragover", (e) => { e.preventDefault(); });
-  previewCanvas.addEventListener("drop", (e) => {
+  const wrap = document.querySelector(".canvas-wrap");
+  wrap.addEventListener("dragover", (e) => { e.preventDefault(); wrap.classList.add("drag"); });
+  wrap.addEventListener("dragleave", () => wrap.classList.remove("drag"));
+  wrap.addEventListener("drop", (e) => {
     e.preventDefault();
-    const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (!f) return;
-    fileInput.files = e.dataTransfer.files;
-    fileInput.dispatchEvent(new Event("change"));
+    wrap.classList.remove("drag");
+    loadFile(e.dataTransfer.files && e.dataTransfer.files[0]);
   });
 
   // ── Boot ────────────────────────────────────────────────────────────
   state.source = buildSampleImage();
-  refreshGates();
   render();
 })();
