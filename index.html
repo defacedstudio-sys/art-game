@@ -155,10 +155,72 @@
           <span class="card-tag">Filter</span>
         </div>
       </a>
+      <a class="game-card" href="layouts.html">
+        <div class="card-preview" id="preview-layouts"></div>
+        <div class="card-body">
+          <h2>Character Layouts</h2>
+          <p>Drop in a library of characters on transparent canvases and batch out hundreds of compositions: staggered rows on off-white, a different cast every time, nobody overlapping, sizes true to the canvases they came from.</p>
+          <span class="card-tag">Generative</span>
+        </div>
+      </a>
     </div>
   </div>
 
   <script>
+    // Animated preview for Character Layouts card
+    (() => {
+      const container = document.getElementById("preview-layouts");
+      const cvs = document.createElement("canvas");
+      cvs.width = 320; cvs.height = 200;
+      container.appendChild(cvs);
+      const ctx = cvs.getContext("2d");
+      const colors = ["#c9457f","#e0a04a","#7fa88c","#8b6fc0","#5a7fc0","#d8763c"];
+      // Staggered rows of stand-in characters, reshuffled now and then.
+      let cast = [];
+      function deal() {
+        cast = [];
+        const rows = 3;
+        for (let r = 0; r < rows; r++) {
+          const n = 2 + Math.floor(Math.random() * 2);
+          const slack = (320 - n * 60) / (n + 1);
+          let x = slack + (r % 2 ? 18 : -8) * Math.random();
+          for (let i = 0; i < n; i++) {
+            const s = 16 + Math.random() * 26;
+            cast.push({
+              x: x + 30, y: 40 + r * 55 + (Math.random() - 0.5) * 16,
+              s: s, color: colors[Math.floor(Math.random() * colors.length)],
+              a: 0,
+            });
+            x += 60 + slack;
+          }
+        }
+      }
+      deal();
+      let t = 0;
+      function draw() {
+        requestAnimationFrame(draw);
+        t++;
+        if (t % 150 === 0) deal();
+        ctx.fillStyle = "#f3f0e9";
+        ctx.fillRect(0, 0, 320, 200);
+        for (const c of cast) {
+          c.a = Math.min(1, c.a + 0.04);
+          ctx.globalAlpha = c.a;
+          ctx.fillStyle = c.color;
+          ctx.strokeStyle = "#2b2230";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.ellipse(c.x, c.y - c.s * 0.3, c.s * 0.34, c.s * 0.3, 0, 0, Math.PI * 2);
+          ctx.fill(); ctx.stroke();
+          ctx.beginPath();
+          ctx.roundRect(c.x - c.s * 0.3, c.y - c.s * 0.05, c.s * 0.6, c.s * 0.75, c.s * 0.2);
+          ctx.fill(); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+      draw();
+    })();
+
     // Animated preview for Tetris card
     (() => {
       const container = document.getElementById("preview-tetris");
